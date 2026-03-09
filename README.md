@@ -28,7 +28,8 @@ An MCP server that gives Claude Code deep access to the [Mojo](https://www.modul
 claude mcp add mojo-mcp --scope user -- uvx --from git+https://github.com/Conobi/mojo-mcp mojo-mcp
 
 # 2. LSP plugin — go-to-definition, hover, diagnostics in .mojo files
-claude /plugins install github.com/Conobi/mojo-mcp
+claude plugin marketplace add github.com/Conobi/mojo-mcp
+claude plugin install mojo-lsp
 ```
 
 `uvx` fetches the MCP package directly from GitHub into an isolated environment. No clone, no manual config.
