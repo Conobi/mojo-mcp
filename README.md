@@ -7,13 +7,14 @@ An MCP server that gives Claude Code deep access to the [Mojo](https://www.modul
 | Tool | What it does |
 |---|---|
 | `search` | Query the cached stdlib index with a Python snippet. Returns structs, functions, traits, aliases across all modules. |
-| `execute` | Run a complete Mojo file. Returns stdout, stderr, and return code. |
+| `execute` | Run a complete Mojo file. Returns stdout, stderr, and return code. Pass `cwd` to pick up a project-pinned version from `.mojo-version`. |
 | `lookup` | Fetch full documentation for one symbol: signature, parameters, methods, args/returns. |
 | `changelog` | Get the Mojo changelog. Filter by version or get the latest two releases. |
 | `read_file` | Read a file from your project (up to 100 KB). |
 | `list_files` | List files in a directory by glob pattern. Defaults to `**/*.mojo`. |
-
-### Why six tools?
+| `mojo_version` | Report the globally installed Mojo version and any project-pinned version from `.mojo-version`. |
+| `install_mojo` | Install, upgrade, or pin the Mojo version (globally or per-project via `.mojo-version`). |
+| `update_server` | Pull the latest mojo-mcp from GitHub into the uvx cache. Restart Claude Code after to apply. |
 
 `search` finds things by name; `lookup` gives you the full contract once you know what you're looking for. Together they let Claude audit a Mojo project for outdated APIs without ever leaving the conversation.
 
@@ -43,7 +44,19 @@ Use `--scope project` on the `mcp add` command to commit the server into `.mcp.j
 
 On first start the server scrapes and indexes the full Mojo stdlib (~200 module pages). This takes 30–60 seconds and is then cached for 14 days at `~/.cache/mojo-mcp/docs.json`. Subsequent starts are instant.
 
-> **Note:** Both `execute` and the LSP plugin require the `mojo` binary on your `PATH` (`uv tool install modular`). The other five MCP tools work without it.
+> **Note:** Both `execute` and the LSP plugin require the `mojo` binary on your `PATH`. Use the `install_mojo` tool or run `uv tool install modular` manually. The other tools work without it.
+
+---
+
+## Updating
+
+Ask Claude to run the `update_server` tool, or run this directly:
+
+```bash
+uvx --refresh --from git+https://github.com/Conobi/mojo-mcp mojo-mcp --version
+```
+
+Then restart Claude Code to load the new version. The `--refresh` flag forces uvx to re-fetch the latest commit from GitHub regardless of what's cached.
 
 ---
 
