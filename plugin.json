@@ -1,0 +1,16 @@
+{
+  "name": "mojo-lsp",
+  "displayName": "Mojo Language Server",
+  "description": "Mojo LSP integration for Claude Code — go-to-definition, hover, diagnostics, and references in .mojo files",
+  "lspServers": {
+    "mojo": {
+      "command": "mojo",
+      "args": ["lsp"],
+      "extensionToLanguage": {
+        ".mojo": "mojo"
+      },
+      "startupTimeout": 8000,
+      "maxRestarts": 3
+    }
+  }
+}

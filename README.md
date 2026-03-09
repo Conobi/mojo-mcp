@@ -24,16 +24,25 @@ An MCP server that gives Claude Code deep access to the [Mojo](https://www.modul
 **Prerequisite:** [uv](https://docs.astral.sh/uv/).
 
 ```bash
+# 1. MCP server — stdlib docs, search, lookup, changelog, execute
 claude mcp add mojo-mcp --scope user -- uvx --from git+https://github.com/Conobi/mojo-mcp mojo-mcp
+
+# 2. LSP plugin — go-to-definition, hover, diagnostics in .mojo files
+claude /plugins install github.com/Conobi/mojo-mcp
 ```
 
-That's it. `uvx` fetches the package directly from GitHub into an isolated environment. No clone, no manual config.
+`uvx` fetches the MCP package directly from GitHub into an isolated environment. No clone, no manual config.
 
-Use `--scope project` instead to commit the server into `.mcp.json` and share it with your team.
+| Component | What it gives Claude |
+|---|---|
+| MCP server | Stdlib search, full symbol docs, changelog, file access, code execution |
+| LSP plugin | Go-to-definition, find-references, hover, diagnostics in your `.mojo` files |
 
-On first start the server scrapes and indexes the full Mojo stdlib (~200 module pages). This takes 30–60 seconds and is then cached for 24 hours at `~/.cache/mojo-mcp/docs.json`. Subsequent starts are instant.
+Use `--scope project` on the `mcp add` command to commit the server into `.mcp.json` and share it with your team.
 
-> **Note:** The `execute` tool requires the `mojo` binary on your `PATH` (`uv tool install modular`). The other five tools work without it.
+On first start the server scrapes and indexes the full Mojo stdlib (~200 module pages). This takes 30–60 seconds and is then cached for 14 days at `~/.cache/mojo-mcp/docs.json`. Subsequent starts are instant.
+
+> **Note:** Both `execute` and the LSP plugin require the `mojo` binary on your `PATH` (`uv tool install modular`). The other five MCP tools work without it.
 
 ---
 
@@ -76,8 +85,8 @@ Combine with `lookup` and `changelog` to find outdated APIs, renamed functions, 
 
 | File | TTL | Contents |
 |---|---|---|
-| `~/.cache/mojo-mcp/docs.json` | 24 h | Full stdlib index |
-| `~/.cache/mojo-mcp/changelog.json` | 1 h | Changelog by version |
+| `~/.cache/mojo-mcp/docs.json` | 14 days | Full stdlib index |
+| `~/.cache/mojo-mcp/changelog.json` | 7 days | Changelog by version |
 
 Delete a file to force a refresh on next use.
 
