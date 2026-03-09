@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 STDLIB_INDEX_URL = "https://docs.modular.com/mojo/std/"
 CACHE_PATH = Path.home() / ".cache" / "mojo-mcp" / "docs.json"
-CACHE_TTL = 86400  # 24 hours
+CACHE_TTL = 1209600  # 14 days
 
 # Unicode zero-width space that Docusaurus appends to headings
 _ZWS = "\u200b"
@@ -403,7 +403,7 @@ async def fetch_symbol_page(query: str) -> str:
 
 CHANGELOG_URL = "https://docs.modular.com/mojo/changelog"
 CHANGELOG_CACHE_PATH = Path.home() / ".cache" / "mojo-mcp" / "changelog.json"
-CHANGELOG_CACHE_TTL = 3600  # 1 hour
+CHANGELOG_CACHE_TTL = 604800  # 7 days
 
 
 def _load_changelog_cache() -> dict | None:
