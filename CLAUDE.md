@@ -76,7 +76,7 @@ All tools are defined as `types.Tool` constants in `server.py` and routed in `ca
 ### 6. `changelog`
 - **Input:** `version` (optional) — `"nightly"`, `"v26.1"`, `"v0.26.1"`, `"v25.5"`, or omit for latest 2
 - **Backend:** `docs.fetch_changelog(version)` — async HTTP fetch + cache
-- **Cache:** `~/.cache/mojo-mcp/changelog.json`, 1 hour TTL
+- **Cache:** `~/.cache/mojo-mcp/changelog.json`, 7 day TTL
 - **Version matching (`_match_version`):**
   - `None` / `"latest"` → first 2 non-`_fetched_at` keys
   - `"nightly"` → exact key `"nightly"`
@@ -88,7 +88,7 @@ All tools are defined as `types.Tool` constants in `server.py` and routed in `ca
 ## Docs Cache
 
 - **Path:** `~/.cache/mojo-mcp/docs.json`
-- **TTL:** 24 hours (`CACHE_TTL = 86400`)
+- **TTL:** 14 days (`CACHE_TTL = 1209600`)
 - **Built by:** `docs.build_docs_index()` — 3-level scrape of `docs.modular.com/mojo/std/`
   1. Index page → package URLs (`/mojo/std/{pkg}/`)
   2. Package pages → module URLs (`/mojo/std/{pkg}/{module}/`)
@@ -143,8 +143,8 @@ No optional extras. No dev dependencies defined yet (no test runner, no linter c
 
 ```
 ~/.cache/mojo-mcp/
-  docs.json        # stdlib module index (24h TTL)
-  changelog.json   # changelog by version (1h TTL)
+  docs.json        # stdlib module index (14d TTL)
+  changelog.json   # changelog by version (7d TTL)
 ```
 
 To force a refresh, delete the relevant file.
