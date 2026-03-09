@@ -1,0 +1,206 @@
+"""Mojo MCP Server — Code Mode pattern.
+
+Exposes exactly two tools to keep context usage ~1,000 tokens:
+  search(code)  — query the Mojo stdlib docs programmatically
+  execute(code) — run a .mojo file and return stdout/stderr
+"""
+
+import asyncio
+import logging
+import sys
+
+import mcp.types as types
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+
+from .docs import fetch_changelog, fetch_symbol_page, get_docs
+from .sandbox import run_execute, run_list_files, run_read_file, run_search
+
+logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(message)s")
+logger = logging.getLogger(__name__)
+
+app = Server("mojo-mcp")
+
+# Docs are loaded once at startup and reused across all requests.
+_docs: dict = {}
+
+SEARCH_TOOL = types.Tool(
+    name="search",
+    description=(
+        "Search the Mojo stdlib reference. "
+        "You have access to a `docs` dict structured as: "
+        "{module_name: {name, description, structs: [{name, signature, description}], "
+        "functions: [{name, signature, description}], traits: [...], aliases: [...]}}. "
+        "Write a Python function body (use `return`) that filters or transforms `docs` "
+        "and returns what you need. No imports available. "
+        "Use `lookup` instead when you need full signatures or method details."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "code": {
+                "type": "string",
+                "description": "Python function body with access to `docs`. Must use `return`.",
+            }
+        },
+        "required": ["code"],
+    },
+)
+
+READ_FILE_TOOL = types.Tool(
+    name="read_file",
+    description=(
+        "Read a file from the user's project. "
+        "Returns file path and contents (capped at 100 KB). "
+        "Use this to inspect .mojo source files during audits."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Absolute or relative path to the file."}
+        },
+        "required": ["path"],
+    },
+)
+
+LIST_FILES_TOOL = types.Tool(
+    name="list_files",
+    description=(
+        "List files in a directory matching a glob pattern. "
+        "Defaults to **/*.mojo. Returns up to 200 sorted paths. "
+        "Use this to discover the structure of a Mojo project."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Directory to search."},
+            "pattern": {"type": "string", "description": "Glob pattern (default: **/*.mojo)."},
+        },
+        "required": ["path"],
+    },
+)
+
+LOOKUP_TOOL = types.Tool(
+    name="lookup",
+    description=(
+        "Fetch full documentation for a specific Mojo symbol. "
+        "Input: dot-notation path like 'collections.dict.Dict' or 'math.math.abs'. "
+        "Returns Markdown with full signature, parameters, methods (structs), args/returns (functions). "
+        "Use `search` to discover names, then `lookup` for full details."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Dot-notation symbol path. E.g. 'collections.dict.Dict', 'builtin.int.Int'.",
+            }
+        },
+        "required": ["query"],
+    },
+)
+
+CHANGELOG_TOOL = types.Tool(
+    name="changelog",
+    description=(
+        "Get the Mojo changelog. Cached for 1 hour. "
+        "No version → latest 2 releases. "
+        "Pass version to filter: 'nightly', 'v26.1', 'v0.26.1', 'v25.5'. "
+        "Returns Markdown with language and stdlib changes."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "version": {
+                "type": "string",
+                "description": "Optional version. Examples: 'nightly', 'v26.1', 'v0.25.7'.",
+            }
+        },
+        "required": [],
+    },
+)
+
+EXECUTE_TOOL = types.Tool(
+    name="execute",
+    description=(
+        "Execute Mojo code. Write a complete .mojo file (include `fn main()`). "
+        "Returns stdout, stderr, and return code. Timeout: 10 seconds."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "code": {
+                "type": "string",
+                "description": "Complete Mojo source file contents.",
+            }
+        },
+        "required": ["code"],
+    },
+)
+
+
+@app.list_tools()
+async def list_tools() -> list[types.Tool]:
+    return [SEARCH_TOOL, EXECUTE_TOOL, READ_FILE_TOOL, LIST_FILES_TOOL, LOOKUP_TOOL, CHANGELOG_TOOL]
+
+
+@app.call_tool()
+async def call_tool(
+    name: str, arguments: dict
+) -> list[types.TextContent]:
+    if name == "search":
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, run_search, arguments.get("code", ""), _docs
+        )
+        return [types.TextContent(type="text", text=result)]
+
+    if name == "execute":
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, run_execute, arguments.get("code", "")
+        )
+        return [types.TextContent(type="text", text=result)]
+
+    if name == "read_file":
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, run_read_file, arguments.get("path", "")
+        )
+        return [types.TextContent(type="text", text=result)]
+
+    if name == "list_files":
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, run_list_files, arguments.get("path", "."), arguments.get("pattern", "**/*.mojo")
+        )
+        return [types.TextContent(type="text", text=result)]
+
+    if name == "lookup":
+        result = await fetch_symbol_page(arguments.get("query", ""))
+        return [types.TextContent(type="text", text=result)]
+
+    if name == "changelog":
+        result = await fetch_changelog(arguments.get("version"))
+        return [types.TextContent(type="text", text=result)]
+
+    raise ValueError(f"Unknown tool: {name}")
+
+
+async def _run() -> None:
+    global _docs
+
+    logger.info("mojo-mcp: loading Mojo stdlib docs (may take a minute on first run)...")
+    _docs = await get_docs()
+    logger.info("mojo-mcp: ready. %d modules indexed.", len(_docs))
+
+    async with stdio_server() as (read_stream, write_stream):
+        await app.run(
+            read_stream,
+            write_stream,
+            app.create_initialization_options(),
+        )
+
+
+def main() -> None:
+    asyncio.run(_run())
+
+
+if __name__ == "__main__":
+    main()
