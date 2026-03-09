@@ -21,33 +21,19 @@ An MCP server that gives Claude Code deep access to the [Mojo](https://www.modul
 
 ## Installation
 
-**Prerequisites:** Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
+**Prerequisite:** [uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone <this-repo> && cd mojo-mcp
-bash scripts/setup.sh
+claude mcp add mojo-mcp --scope user -- uvx --from git+https://github.com/Conobi/mojo-mcp mojo-mcp
 ```
 
-The setup script installs the Mojo compiler via `uv tool install modular` and syncs the Python dependencies. The `execute` tool requires a working `mojo` binary; the other five tools work without it.
+That's it. `uvx` fetches the package directly from GitHub into an isolated environment. No clone, no manual config.
 
----
-
-## Configuration
-
-Add this to your `~/.claude/mcp.json` (adjust the path):
-
-```json
-{
-  "mcpServers": {
-    "mojo": {
-      "command": "uv",
-      "args": ["run", "--project", "/path/to/mojo-mcp", "mojo-mcp"]
-    }
-  }
-}
-```
+Use `--scope project` instead to commit the server into `.mcp.json` and share it with your team.
 
 On first start the server scrapes and indexes the full Mojo stdlib (~200 module pages). This takes 30–60 seconds and is then cached for 24 hours at `~/.cache/mojo-mcp/docs.json`. Subsequent starts are instant.
+
+> **Note:** The `execute` tool requires the `mojo` binary on your `PATH` (`uv tool install modular`). The other five tools work without it.
 
 ---
 
