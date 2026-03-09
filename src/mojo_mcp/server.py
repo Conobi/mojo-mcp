@@ -1,8 +1,14 @@
 """Mojo MCP Server — Code Mode pattern.
 
-Exposes exactly two tools to keep context usage ~1,000 tokens:
-  search(code)  — query the Mojo stdlib docs programmatically
-  execute(code) — run a .mojo file and return stdout/stderr
+Tools exposed:
+  search(code)        — query the Mojo stdlib docs programmatically
+  execute(code, cwd)  — run a .mojo file, respecting .mojo-version if present
+  mojo_version(path)  — report global and project-pinned Mojo versions
+  install_mojo(...)   — install/upgrade Mojo globally or pin a project version
+  read_file(path)     — read a source file
+  list_files(path)    — list .mojo files in a directory
+  lookup(query)       — fetch full symbol docs
+  changelog(version)  — get Mojo changelog
 """
 
 import asyncio
@@ -14,7 +20,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 
 from .docs import fetch_changelog, fetch_symbol_page, get_docs
-from .sandbox import run_execute, run_list_files, run_read_file, run_search
+from .sandbox import run_execute, run_install_mojo, run_list_files, run_mojo_version, run_read_file, run_search
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -44,6 +50,82 @@ SEARCH_TOOL = types.Tool(
             }
         },
         "required": ["code"],
+    },
+)
+
+EXECUTE_TOOL = types.Tool(
+    name="execute",
+    description=(
+        "Execute Mojo code. Write a complete .mojo file (include `fn main()`). "
+        "Returns stdout, stderr, and return code. Timeout: 10 seconds. "
+        "Pass `cwd` to enable project-local version selection: if a .mojo-version "
+        "file exists in `cwd` or any parent, that version is run via uvx instead of "
+        "the global mojo binary. "
+        "If mojo is not installed, call `install_mojo` first."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "code": {
+                "type": "string",
+                "description": "Complete Mojo source file contents.",
+            },
+            "cwd": {
+                "type": "string",
+                "description": (
+                    "Optional working directory. Used to locate a .mojo-version file "
+                    "that pins the Mojo version for this project."
+                ),
+            },
+        },
+        "required": ["code"],
+    },
+)
+
+MOJO_VERSION_TOOL = types.Tool(
+    name="mojo_version",
+    description=(
+        "Report the active Mojo version(s). "
+        "Returns the globally installed mojo binary version and, if a .mojo-version "
+        "file is found by walking up from `path`, the project-pinned version and its file location. "
+        "Call this before executing to understand which version will be used."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Optional path to start searching for a .mojo-version file.",
+            }
+        },
+        "required": [],
+    },
+)
+
+INSTALL_MOJO_TOOL = types.Tool(
+    name="install_mojo",
+    description=(
+        "Install, upgrade, or pin the Mojo version used by a project. "
+        "All operations require uv to be installed. "
+        "\n\nBehaviours (by argument combination):"
+        "\n- version + project_path → write .mojo-version in project_path and warm the uvx cache"
+        "\n- project_path only      → remove .mojo-version (revert project to global mojo)"
+        "\n- version only           → uv tool install modular==<version> globally"
+        "\n- neither                → uv tool install modular (latest) or upgrade if already installed"
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "version": {
+                "type": "string",
+                "description": "Modular package version, e.g. '26.1.0' or '25.1.0'.",
+            },
+            "project_path": {
+                "type": "string",
+                "description": "Project root directory in which to write (or remove) .mojo-version.",
+            },
+        },
+        "required": [],
     },
 )
 
@@ -120,67 +202,65 @@ CHANGELOG_TOOL = types.Tool(
     },
 )
 
-EXECUTE_TOOL = types.Tool(
-    name="execute",
-    description=(
-        "Execute Mojo code. Write a complete .mojo file (include `fn main()`). "
-        "Returns stdout, stderr, and return code. Timeout: 10 seconds."
-    ),
-    inputSchema={
-        "type": "object",
-        "properties": {
-            "code": {
-                "type": "string",
-                "description": "Complete Mojo source file contents.",
-            }
-        },
-        "required": ["code"],
-    },
-)
-
 
 @app.list_tools()
 async def list_tools() -> list[types.Tool]:
-    return [SEARCH_TOOL, EXECUTE_TOOL, READ_FILE_TOOL, LIST_FILES_TOOL, LOOKUP_TOOL, CHANGELOG_TOOL]
+    return [
+        SEARCH_TOOL,
+        EXECUTE_TOOL,
+        MOJO_VERSION_TOOL,
+        INSTALL_MOJO_TOOL,
+        READ_FILE_TOOL,
+        LIST_FILES_TOOL,
+        LOOKUP_TOOL,
+        CHANGELOG_TOOL,
+    ]
 
 
 @app.call_tool()
-async def call_tool(
-    name: str, arguments: dict
-) -> list[types.TextContent]:
+async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+    loop = asyncio.get_event_loop()
+
     if name == "search":
-        result = await asyncio.get_event_loop().run_in_executor(
+        result = await loop.run_in_executor(
             None, run_search, arguments.get("code", ""), _docs
         )
-        return [types.TextContent(type="text", text=result)]
 
-    if name == "execute":
-        result = await asyncio.get_event_loop().run_in_executor(
-            None, run_execute, arguments.get("code", "")
+    elif name == "execute":
+        result = await loop.run_in_executor(
+            None, run_execute, arguments.get("code", ""), arguments.get("cwd")
         )
-        return [types.TextContent(type="text", text=result)]
 
-    if name == "read_file":
-        result = await asyncio.get_event_loop().run_in_executor(
+    elif name == "mojo_version":
+        result = await loop.run_in_executor(
+            None, run_mojo_version, arguments.get("path")
+        )
+
+    elif name == "install_mojo":
+        result = await loop.run_in_executor(
+            None, run_install_mojo, arguments.get("version"), arguments.get("project_path")
+        )
+
+    elif name == "read_file":
+        result = await loop.run_in_executor(
             None, run_read_file, arguments.get("path", "")
         )
-        return [types.TextContent(type="text", text=result)]
 
-    if name == "list_files":
-        result = await asyncio.get_event_loop().run_in_executor(
+    elif name == "list_files":
+        result = await loop.run_in_executor(
             None, run_list_files, arguments.get("path", "."), arguments.get("pattern", "**/*.mojo")
         )
-        return [types.TextContent(type="text", text=result)]
 
-    if name == "lookup":
+    elif name == "lookup":
         result = await fetch_symbol_page(arguments.get("query", ""))
-        return [types.TextContent(type="text", text=result)]
 
-    if name == "changelog":
+    elif name == "changelog":
         result = await fetch_changelog(arguments.get("version"))
-        return [types.TextContent(type="text", text=result)]
 
-    raise ValueError(f"Unknown tool: {name}")
+    else:
+        raise ValueError(f"Unknown tool: {name}")
+
+    return [types.TextContent(type="text", text=result)]
 
 
 async def _run() -> None:
