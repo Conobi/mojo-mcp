@@ -20,7 +20,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 
 from .docs import fetch_changelog, fetch_symbol_page, get_docs
-from .sandbox import run_execute, run_install_mojo, run_list_files, run_mojo_version, run_read_file, run_search
+from .sandbox import run_execute, run_install_mojo, run_list_files, run_mojo_version, run_read_file, run_search, run_update_server
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -100,6 +100,16 @@ MOJO_VERSION_TOOL = types.Tool(
         },
         "required": [],
     },
+)
+
+UPDATE_SERVER_TOOL = types.Tool(
+    name="update_server",
+    description=(
+        "Pull the latest mojo-mcp from GitHub and refresh the uvx cache. "
+        "The running server is NOT replaced — the user must restart Claude Code "
+        "after this completes to load the new version."
+    ),
+    inputSchema={"type": "object", "properties": {}, "required": []},
 )
 
 INSTALL_MOJO_TOOL = types.Tool(
@@ -210,6 +220,7 @@ async def list_tools() -> list[types.Tool]:
         EXECUTE_TOOL,
         MOJO_VERSION_TOOL,
         INSTALL_MOJO_TOOL,
+        UPDATE_SERVER_TOOL,
         READ_FILE_TOOL,
         LIST_FILES_TOOL,
         LOOKUP_TOOL,
@@ -235,6 +246,9 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         result = await loop.run_in_executor(
             None, run_mojo_version, arguments.get("path")
         )
+
+    elif name == "update_server":
+        result = await loop.run_in_executor(None, run_update_server)
 
     elif name == "install_mojo":
         result = await loop.run_in_executor(

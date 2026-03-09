@@ -252,6 +252,46 @@ def run_mojo_version(path: str | None = None) -> str:
     return json.dumps(result, indent=2)
 
 
+_GITHUB_URL = "git+https://github.com/Conobi/mojo-mcp"
+
+
+def run_update_server() -> str:
+    """Re-fetch the latest mojo-mcp from GitHub into the uvx cache.
+
+    Uses `uvx --refresh` to pull the latest commit. The running process is
+    not replaced — the user must restart Claude Code to load the new version.
+    """
+    uv_path = shutil.which("uv") or shutil.which("uvx")
+    if not uv_path:
+        return json.dumps({
+            "error": "uv not found. Install it: https://docs.astral.sh/uv/getting-started/installation/"
+        })
+
+    try:
+        proc = subprocess.run(
+            ["uvx", "--refresh", "--from", _GITHUB_URL, "mojo-mcp", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if proc.returncode == 0:
+            return json.dumps({
+                "status": "updated",
+                "version": proc.stdout.strip() or proc.stderr.strip(),
+                "next_step": "Restart Claude Code to load the new version.",
+            })
+        return json.dumps({
+            "error": "update failed",
+            "stdout": proc.stdout[:MAX_OUTPUT],
+            "stderr": proc.stderr[:MAX_OUTPUT],
+            "returncode": proc.returncode,
+        })
+    except subprocess.TimeoutExpired:
+        return json.dumps({"error": "update timed out after 120 seconds"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
 def run_install_mojo(version: str | None = None, project_path: str | None = None) -> str:
     """Install or upgrade Mojo, optionally pinning a project to a specific version.
 
