@@ -34,7 +34,7 @@ uv run python -c "..."   # quick in-process tests
 
 ---
 
-## The Six Tools
+## The Nine Tools
 
 All tools are defined as `types.Tool` constants in `server.py` and routed in `call_tool`.
 
@@ -47,8 +47,15 @@ All tools are defined as `types.Tool` constants in `server.py` and routed in `ca
 
 ### 2. `execute`
 - **Input:** `code` — complete Mojo source file (must have `fn main()`)
-- **Backend:** `sandbox.run_execute(code)` — writes to `mkdtemp`, runs `mojo run`, 10 s timeout
-- **Returns:** `{stdout, stderr, returncode}` JSON
+- **Optional inputs:**
+  - `cwd` — working directory for the subprocess (relative paths like `-I .` resolve from here); also used to locate `.mojo-version`
+  - `include_paths` — list of strings passed as `-I` flags (e.g. `["."]` to import local packages)
+  - `defines` — dict of compile-time defines passed as `-D KEY=VALUE` (e.g. `{"ASSERT": "all"}`)
+  - `timeout` — process timeout in seconds (default 30)
+- **Backend:** `sandbox.run_execute(code, cwd, include_paths, defines, timeout)` — writes to `mkdtemp`, runs `mojo run [flags] <file>` from `cwd`
+- **Key fix:** subprocess `cwd` is set to the user's `cwd` (not `tmp_dir`) so that `-I .` resolves against the project root
+- **Returns:** `{stdout, stderr, returncode[, mojo_version, version_file]}` JSON
+- **Typical project test:** `execute(code=..., cwd="/path/to/project", include_paths=["."], defines={"ASSERT": "all"})`
 
 ### 3. `read_file`
 - **Input:** `path` — absolute or relative path
@@ -158,3 +165,5 @@ To force a refresh, delete the relevant file.
 - No authentication — all fetches are unauthenticated public docs.
 - `is_x86()` detection moved to `sys.info.CompilationTarget` in Mojo v25.5; the docs index does not yet expose struct methods, so `lookup` on `CompilationTarget` may be incomplete.
 - The `execute` tool requires a real `mojo` binary. If not installed: returns a helpful error pointing to `uv tool install modular`.
+- `execute` runs the subprocess from `cwd` (not `tmp_dir`) so `-I .` resolves against the project root; the temp file path is absolute so this is safe.
+- `execute` default timeout raised to 30 s (was 10 s) to accommodate project compilation.
