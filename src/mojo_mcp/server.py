@@ -325,8 +325,18 @@ async def _run() -> None:
 def main() -> None:
     import sys
     if "--version" in sys.argv:
-        from importlib.metadata import version
-        print(version("mojo-mcp"))
+        import json
+        from importlib.metadata import Distribution
+        dist = Distribution.from_name("mojo-mcp")
+        direct_url = dist.read_text("direct_url.json")
+        if direct_url:
+            info = json.loads(direct_url)
+            commit = info.get("vcs_info", {}).get("commit_id", "")
+            if commit:
+                print(commit[:12])
+                return
+        # Fallback for editable / non-git installs
+        print(dist.metadata["Version"])
         return
     asyncio.run(_run())
 
