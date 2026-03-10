@@ -323,6 +323,11 @@ async def _run() -> None:
 
 
 def main() -> None:
+    import sys
+    if "--version" in sys.argv:
+        from importlib.metadata import version
+        print(version("mojo-mcp"))
+        return
     asyncio.run(_run())
 
 
