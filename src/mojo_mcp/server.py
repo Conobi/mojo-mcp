@@ -1,14 +1,14 @@
 """Mojo MCP Server — Code Mode pattern.
 
 Tools exposed:
-  search(code)        — query the Mojo stdlib docs programmatically
-  execute(code, cwd)  — run a .mojo file, respecting .mojo-version if present
-  mojo_version(path)  — report global and project-pinned Mojo versions
-  install_mojo(...)   — install/upgrade Mojo globally or pin a project version
-  read_file(path)     — read a source file
-  list_files(path)    — list .mojo files in a directory
-  lookup(query)       — fetch full symbol docs
-  changelog(version)  — get Mojo changelog
+  search(code)                             — query the Mojo stdlib docs programmatically
+  execute(code, cwd, include_paths, ...)   — run a .mojo file with project flags
+  mojo_version(path)                       — report global and project-pinned Mojo versions
+  install_mojo(...)                        — install/upgrade Mojo globally or pin a project version
+  read_file(path)                          — read a source file
+  list_files(path)                         — list .mojo files in a directory
+  lookup(query)                            — fetch full symbol docs
+  changelog(version)                       — get Mojo changelog
 """
 
 import asyncio
@@ -57,10 +57,13 @@ EXECUTE_TOOL = types.Tool(
     name="execute",
     description=(
         "Execute Mojo code. Write a complete .mojo file (include `fn main()`). "
-        "Returns stdout, stderr, and return code. Timeout: 10 seconds. "
-        "Pass `cwd` to enable project-local version selection: if a .mojo-version "
-        "file exists in `cwd` or any parent, that version is run via uvx instead of "
-        "the global mojo binary. "
+        "Returns stdout, stderr, and return code. Default timeout: 30 seconds. "
+        "Pass `cwd` to set the working directory; this also enables project-local "
+        "version selection (nearest .mojo-version file is honoured). "
+        "Pass `include_paths` for `-I` flags (e.g. `[\".\""]` to import local packages). "
+        "Pass `defines` for `-D` compile-time defines (e.g. `{\"ASSERT\": \"all\"}`). "
+        "Typical project test invocation: cwd=<project_root>, include_paths=[\".\"], "
+        "defines={\"ASSERT\": \"all\"}. "
         "If mojo is not installed, call `install_mojo` first."
     ),
     inputSchema={
@@ -73,9 +76,30 @@ EXECUTE_TOOL = types.Tool(
             "cwd": {
                 "type": "string",
                 "description": (
-                    "Optional working directory. Used to locate a .mojo-version file "
-                    "that pins the Mojo version for this project."
+                    "Working directory for the Mojo process. Relative include paths "
+                    "are resolved from here. Also used to locate a .mojo-version file."
                 ),
+            },
+            "include_paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "List of paths passed as -I flags. "
+                    "Use [\".\"] to import packages from the project root (cwd)."
+                ),
+            },
+            "defines": {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+                "description": (
+                    "Compile-time -D defines. Each key-value pair becomes "
+                    "`-D KEY=VALUE`; an empty string value becomes `-D KEY`. "
+                    "Example: {\"ASSERT\": \"all\"}."
+                ),
+            },
+            "timeout": {
+                "type": "integer",
+                "description": "Process timeout in seconds (default 30).",
             },
         },
         "required": ["code"],
@@ -239,7 +263,13 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
     elif name == "execute":
         result = await loop.run_in_executor(
-            None, run_execute, arguments.get("code", ""), arguments.get("cwd")
+            None,
+            run_execute,
+            arguments.get("code", ""),
+            arguments.get("cwd"),
+            arguments.get("include_paths"),
+            arguments.get("defines"),
+            arguments.get("timeout", 30),
         )
 
     elif name == "mojo_version":

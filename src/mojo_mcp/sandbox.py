@@ -158,15 +158,45 @@ def run_list_files(path: str, pattern: str = "**/*.mojo") -> str:
 # Execute
 # ---------------------------------------------------------------------------
 
-def run_execute(code: str, cwd: str | None = None) -> str:
+def run_execute(
+    code: str,
+    cwd: str | None = None,
+    include_paths: list[str] | None = None,
+    defines: dict[str, str] | None = None,
+    timeout: int = 30,
+) -> str:
     """Execute Mojo code in an isolated temp directory.
 
-    If a .mojo-version file is found by walking up from `cwd`, the pinned
-    version is run via `uvx --from modular==<version> mojo run` (cached by uv).
-    Otherwise falls back to the globally installed `mojo` binary.
+    The temp file lives in mkdtemp but the subprocess runs from `cwd` (when
+    provided) so that relative include paths like ``-I .`` resolve against the
+    user's project root rather than the temp directory.
+
+    Args:
+        code:          Complete Mojo source (must contain ``fn main()``).
+        cwd:           Project directory.  Used to locate ``.mojo-version`` and
+                       as the working directory for the Mojo process.
+        include_paths: Extra ``-I <path>`` flags appended before the source
+                       file.  Paths are interpreted relative to ``cwd``.
+        defines:       ``-D KEY=VALUE`` (or ``-D KEY`` when value is empty/None)
+                       compile-time defines.  E.g. ``{"ASSERT": "all"}``.
+        timeout:       Process timeout in seconds (default 30).
     """
     version_file, pinned_version = _find_mojo_version_file(cwd)
     mojo_prefix = _mojo_cmd(pinned_version)
+
+    # Build -I / -D flags
+    extra_flags: list[str] = []
+    for path in (include_paths or []):
+        extra_flags.extend(["-I", path])
+    for key, val in (defines or {}).items():
+        if val:
+            extra_flags.extend(["-D", f"{key}={val}"])
+        else:
+            extra_flags.extend(["-D", key])
+
+    # Subprocess working directory: user's project root when given, otherwise
+    # the temp dir (keeps backward-compatibility for standalone snippets).
+    run_cwd = str(Path(cwd).resolve()) if cwd else None
 
     tmp_dir = tempfile.mkdtemp(prefix="mojo-mcp-")
     tmp_file = f"{tmp_dir}/main.mojo"
@@ -174,12 +204,13 @@ def run_execute(code: str, cwd: str | None = None) -> str:
         with open(tmp_file, "w") as f:
             f.write(code)
 
+        cmd = [*mojo_prefix, "run", *extra_flags, tmp_file]
         result = subprocess.run(
-            [*mojo_prefix, "run", tmp_file],
+            cmd,
             capture_output=True,
             text=True,
-            timeout=10,
-            cwd=tmp_dir,
+            timeout=timeout,
+            cwd=run_cwd or tmp_dir,
         )
         output = {
             "stdout": result.stdout[:MAX_OUTPUT],
@@ -190,7 +221,7 @@ def run_execute(code: str, cwd: str | None = None) -> str:
             output["mojo_version"] = pinned_version
             output["version_file"] = str(version_file)
     except subprocess.TimeoutExpired:
-        output = {"error": "execution timed out after 10 seconds"}
+        output = {"error": f"execution timed out after {timeout} seconds"}
     except FileNotFoundError:
         if pinned_version:
             output = {
