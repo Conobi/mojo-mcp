@@ -60,7 +60,7 @@ EXECUTE_TOOL = types.Tool(
         "Returns stdout, stderr, and return code. Default timeout: 30 seconds. "
         "Pass `cwd` to set the working directory; this also enables project-local "
         "version selection (nearest .mojo-version file is honoured). "
-        "Pass `include_paths` for `-I` flags (e.g. `[\".\""]` to import local packages). "
+        "Pass `include_paths` for `-I` flags (e.g. `[\".\"]` to import local packages). "
         "Pass `defines` for `-D` compile-time defines (e.g. `{\"ASSERT\": \"all\"}`). "
         "Typical project test invocation: cwd=<project_root>, include_paths=[\".\"], "
         "defines={\"ASSERT\": \"all\"}. "
