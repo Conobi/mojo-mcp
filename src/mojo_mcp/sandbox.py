@@ -35,11 +35,18 @@ def _mojo_cmd(version: str | None) -> list[str]:
     """Return the mojo command prefix for a given version.
 
     With a version: uses uvx --from mojo-compiler==<version> mojo (cached per version).
-    Without:        uses uvx --from mojo-compiler mojo (latest uv-managed installation).
+      .mojo-version files use the modular version format (e.g. "25.6.0"), but
+      mojo-compiler on PyPI uses a "0."-prefixed format (e.g. "0.25.6.0").
+      We normalise automatically.
+    Without: uses the globally installed mojo binary (system PATH).
     """
     if version:
+        # Normalise "25.6.0" → "0.25.6.0" for mojo-compiler on PyPI.
+        # Already-prefixed versions like "0.25.6.0" are left unchanged.
+        if not version.startswith("0."):
+            version = f"0.{version}"
         return ["uvx", "--from", f"mojo-compiler=={version}", "mojo"]
-    return ["uvx", "--from", "mojo-compiler", "mojo"]
+    return ["mojo"]
 
 
 # ---------------------------------------------------------------------------
@@ -233,8 +240,8 @@ def run_execute(
         else:
             output = {
                 "error": (
-                    "mojo binary not found via uvx. "
-                    "Ensure uv is installed: https://docs.astral.sh/uv/getting-started/installation/  "
+                    "mojo binary not found. "
+                    "Install it with: uv tool install mojo  "
                     "Or call the install_mojo tool."
                 )
             }
@@ -358,7 +365,7 @@ def run_install_mojo(version: str | None = None, project_path: str | None = None
         # Warm the uv cache so first execution is fast
         try:
             proc = subprocess.run(
-                ["uvx", "--from", f"mojo-compiler=={version}", "mojo", "--version"],
+                _mojo_cmd(version) + ["--version"],
                 capture_output=True, text=True, timeout=120,
             )
             mojo_ver = proc.stdout.strip() or proc.stderr.strip()
