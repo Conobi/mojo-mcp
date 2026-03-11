@@ -34,12 +34,12 @@ def _find_mojo_version_file(cwd: str | None) -> tuple[Path | None, str | None]:
 def _mojo_cmd(version: str | None) -> list[str]:
     """Return the mojo command prefix for a given version.
 
-    With a version: uses uvx --from modular==<version> mojo (cached per version).
-    Without:        uses the globally installed mojo binary.
+    With a version: uses uvx --from mojo-compiler==<version> mojo (cached per version).
+    Without:        uses uvx --from mojo-compiler mojo (latest uv-managed installation).
     """
     if version:
-        return ["uvx", "--from", f"modular=={version}", "mojo"]
-    return ["mojo"]
+        return ["uvx", "--from", f"mojo-compiler=={version}", "mojo"]
+    return ["uvx", "--from", "mojo-compiler", "mojo"]
 
 
 # ---------------------------------------------------------------------------
@@ -226,15 +226,15 @@ def run_execute(
         if pinned_version:
             output = {
                 "error": (
-                    f"Could not run modular=={pinned_version} via uvx. "
+                    f"Could not run mojo-compiler=={pinned_version} via uvx. "
                     "Ensure uv is installed: https://docs.astral.sh/uv/getting-started/installation/"
                 )
             }
         else:
             output = {
                 "error": (
-                    "mojo binary not found. "
-                    "Install it with: uv tool install modular  "
+                    "mojo binary not found via uvx. "
+                    "Ensure uv is installed: https://docs.astral.sh/uv/getting-started/installation/  "
                     "Or call the install_mojo tool."
                 )
             }
@@ -358,7 +358,7 @@ def run_install_mojo(version: str | None = None, project_path: str | None = None
         # Warm the uv cache so first execution is fast
         try:
             proc = subprocess.run(
-                ["uvx", "--from", f"modular=={version}", "mojo", "--version"],
+                ["uvx", "--from", f"mojo-compiler=={version}", "mojo", "--version"],
                 capture_output=True, text=True, timeout=120,
             )
             mojo_ver = proc.stdout.strip() or proc.stderr.strip()
