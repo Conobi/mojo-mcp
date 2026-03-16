@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "mojo-lsp",
-      "description": "Mojo language server integration. Provides go-to-definition, find-references, hover, and diagnostics in .mojo files via the built-in mojo lsp command.",
+      "description": "Mojo language server integration. Provides go-to-definition, find-references, hover, and diagnostics in .mojo files via the mojo lsp command (installed through mojo-compiler).",
       "version": "1.0.0",
       "author": {
         "name": "Conobi",
@@ -24,8 +24,8 @@
       "strict": false,
       "lspServers": {
         "mojo": {
-          "command": "mojo",
-          "args": ["lsp"],
+          "command": "uvx",
+          "args": ["--from", "mojo-compiler", "mojo", "lsp"],
           "extensionToLanguage": {
             ".mojo": "mojo"
           }

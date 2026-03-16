@@ -1,6 +1,6 @@
 # mojo-lsp
 
-Mojo language server for Claude Code, providing code intelligence via the built-in `mojo lsp` command.
+Mojo language server for Claude Code, providing code intelligence via `uvx --from mojo-compiler mojo lsp`.
 
 ## Supported Extensions
 
@@ -16,16 +16,16 @@ Mojo language server for Claude Code, providing code intelligence via the built-
 
 ## Installation
 
-Install the Mojo runtime via the Modular CLI:
+Install the Mojo compiler:
 
 ```bash
-uv tool install modular
+uv tool install mojo-compiler
 ```
 
-Make sure `mojo` is on your `PATH`:
+Verify it works:
 
 ```bash
-mojo --version
+uvx --from mojo-compiler mojo --version
 ```
 
 ## More Information
