@@ -12,9 +12,9 @@ class TestLoadGotchas:
         gotchas = load_gotchas()
         assert isinstance(gotchas, list)
 
-    def test_load_has_11_entries(self):
+    def test_load_has_16_entries(self):
         gotchas = load_gotchas()
-        assert len(gotchas) == 11
+        assert len(gotchas) == 16
 
     def test_all_entries_have_required_fields(self):
         gotchas = load_gotchas()
@@ -64,36 +64,36 @@ class TestLoadGotchas:
 
 class TestValidateCode:
     def test_clean_code_no_issues(self):
-        code = "fn main():\n    print('hello')\n"
+        code = "def main():\n    print('hello')\n"
         issues = validate_code(code, "0.26.2")
         assert issues == []
 
     def test_detects_module_level_var(self):
-        code = "var x = 10\nfn main():\n    print(x)\n"
+        code = "var x = 10\ndef main():\n    print(x)\n"
         issues = validate_code(code, "0.26.2")
         ids = [i["id"] for i in issues]
         assert "no-module-level-mutable" in ids
 
     def test_detects_dtypepointer(self):
-        code = "fn main():\n    var p = DTypePointer[DType.float32].alloc(10)\n"
+        code = "def main():\n    var p = DTypePointer[DType.float32].alloc(10)\n"
         issues = validate_code(code, "0.26.2")
         ids = [i["id"] for i in issues]
         assert "dtypepointer-deprecated" in ids
 
     def test_detects_match_keyword(self):
-        code = "fn main():\n    match x:\n        case 1: pass\n"
+        code = "def main():\n    match x:\n        case 1: pass\n"
         issues = validate_code(code, "0.26.2")
         ids = [i["id"] for i in issues]
         assert "no-match-enum" in ids
 
     def test_detects_variant_get(self):
-        code = "fn main():\n    var v = Variant[Int, String](42)\n    var x = v.get[Int]()\n"
+        code = "def main():\n    var v = Variant[Int, String](42)\n    var x = v.get[Int]()\n"
         issues = validate_code(code, "0.26.2")
         ids = [i["id"] for i in issues]
         assert "variant-reference-not-copy" in ids
 
     def test_detects_multiple_issues(self):
-        code = "var x = DTypePointer[DType.int8].alloc(1)\nfn main():\n    pass\n"
+        code = "var x = DTypePointer[DType.int8].alloc(1)\ndef main():\n    pass\n"
         issues = validate_code(code, "0.26.2")
         ids = [i["id"] for i in issues]
         assert "no-module-level-mutable" in ids
