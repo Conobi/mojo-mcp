@@ -89,15 +89,15 @@ gotchas:
     fix: "Split stable code into a package: `mojo package mylib/ -o mylib.mojopkg`, then import it."
     link: null
 
-  - id: init-moveinit-confusion
-    title: "__init__ vs __moveinit__ confusion"
+  - id: moveinit-copyinit-renamed
+    title: "__moveinit__ and __copyinit__ renamed to __init__ with keyword args"
     severity: warning
-    mojo_versions: [">=0.26.0"]
-    code_pattern: "fn __moveinit__"
+    mojo_versions: [">=0.26.2"]
+    code_pattern: "\\bdef __(?:moveinit|copyinit)__\\b"
     error_pattern: null
     timeout_pattern: false
-    description: "Mojo distinguishes __init__ (construction), __copyinit__ (copy), and __moveinit__ (move). Implementing __moveinit__ without __copyinit__ means the type cannot be copied, only moved."
-    fix: "Implement both __copyinit__ and __moveinit__ unless you explicitly want a move-only type."
+    description: "Since Mojo 0.26.2, __moveinit__() and __copyinit__() are renamed to __init__() with keyword-only `take` and `copy` arguments respectively. The legacy names still work but should be migrated."
+    fix: "Replace `def __moveinit__(out self, *, take existing: Self)` with `def __init__(out self, *, take: Self)`. Replace `def __copyinit__(out self, *, copy existing: Self)` with `def __init__(out self, *, copy: Self)`."
     link: null
 
   - id: for-loop-reference
@@ -120,4 +120,59 @@ gotchas:
     timeout_pattern: false
     description: "Mojo integer overflow is undefined behavior with no runtime check by default. This can cause silent corruption."
     fix: "Use checked arithmetic or enable overflow checks with `-D ASSERT=all` during development."
+    link: null
+
+  - id: fn-deprecated
+    title: "'fn' is deprecated — use 'def' instead"
+    severity: warning
+    mojo_versions: [">=0.26.2"]
+    code_pattern: "^fn\\s+"
+    error_pattern: "deprecated.*\\bfn\\b"
+    timeout_pattern: false
+    description: "Since Mojo 0.26.2, `def` is the standard function declaration keyword. `fn` is deprecated and will be removed. `def` now has the same semantics as `fn` (non-raising by default, explicit `raises` required)."
+    fix: "Replace `fn` with `def`. Add `raises` explicitly if the function can raise."
+    link: null
+
+  - id: owned-keyword-removed
+    title: "'owned' keyword has been removed"
+    severity: warning
+    mojo_versions: [">=0.26.2"]
+    code_pattern: "\\bowned\\s+\\w+"
+    error_pattern: "owned"
+    timeout_pattern: false
+    description: "The `owned` keyword has been removed in Mojo 0.26.2. Use `var` for parameters or `deinit` for __moveinit__/__del__ arguments."
+    fix: "Replace `owned` with `var` (for general parameters) or `deinit` (for move/destroy arguments)."
+    link: null
+
+  - id: stringable-deprecated
+    title: "Stringable and Representable deprecated — use Writable"
+    severity: info
+    mojo_versions: [">=0.26.2"]
+    code_pattern: "\\b(?:Stringable|Representable)\\b"
+    error_pattern: "(?:Stringable|Representable).+deprecated"
+    timeout_pattern: false
+    description: "Stringable and Representable traits are deprecated in Mojo 0.26.2. They are replaced by the unified Writable trait, which provides default implementations."
+    fix: "Replace `Stringable` and `Representable` conformances with `Writable`."
+    link: null
+
+  - id: parameter-if-deprecated
+    title: "@parameter if/for deprecated — use comptime if/for"
+    severity: info
+    mojo_versions: [">=0.26.2"]
+    code_pattern: "@parameter\\s*\\n\\s*(?:if|for)\\s+"
+    error_pattern: null
+    timeout_pattern: false
+    description: "The `@parameter if` and `@parameter for` syntax is deprecated in Mojo 0.26.2. Use `comptime if` and `comptime for` instead."
+    fix: "Replace `@parameter\\nif condition:` with `comptime if condition:`. Replace `@parameter\\nfor i in range(N):` with `comptime for i in range(N):`."
+    link: null
+
+  - id: emoji-extension-removed
+    title: ".🔥 and 📦 file extensions no longer supported"
+    severity: warning
+    mojo_versions: [">=0.26.2"]
+    code_pattern: null
+    error_pattern: "emoji.*extension|🔥|📦"
+    timeout_pattern: false
+    description: "The .🔥 (flame) and 📦 (package) emoji file extensions are no longer supported in Mojo 0.26.2. Use .mojo for source files and __init__.mojo for packages."
+    fix: "Rename .🔥 files to .mojo and 📦 files to __init__.mojo."
     link: null
