@@ -227,8 +227,24 @@ def run_execute(
         if pinned_version:
             output["mojo_version"] = pinned_version
             output["version_file"] = str(version_file)
+        # Enrich failed executions with gotcha hints
+        if result.returncode != 0:
+            from .gotchas import enrich_error
+            version_for_enrich = pinned_version or "0.26.0"
+            parts = version_for_enrich.split(".")
+            version_for_enrich = ".".join(parts[:3])
+            hints = enrich_error(result.stderr, timed_out=False, mojo_version=version_for_enrich)
+            if hints:
+                output["gotcha_hints"] = hints
     except subprocess.TimeoutExpired:
+        from .gotchas import enrich_error
+        version_for_enrich = pinned_version or "0.26.0"
+        parts = version_for_enrich.split(".")
+        version_for_enrich = ".".join(parts[:3])
+        hints = enrich_error(code, timed_out=True, mojo_version=version_for_enrich)
         output = {"error": f"execution timed out after {timeout} seconds"}
+        if hints:
+            output["gotcha_hints"] = hints
     except FileNotFoundError:
         if pinned_version:
             output = {
@@ -421,3 +437,48 @@ def run_install_mojo(version: str | None = None, project_path: str | None = None
         return json.dumps({"error": "operation timed out after 120 seconds"})
     except Exception as e:
         return json.dumps({"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# Validate
+# ---------------------------------------------------------------------------
+
+def run_validate(
+    code: str | None = None,
+    path: str | None = None,
+    mojo_version: str | None = None,
+) -> str:
+    """Validate Mojo source code against known gotcha patterns.
+
+    Args:
+        code:         Mojo source code string. Takes precedence over path.
+        path:         Path to a .mojo file to validate.
+        mojo_version: Mojo version for filtering. Defaults to global version.
+    """
+    from .gotchas import validate_code
+
+    if code is None and path is None:
+        return json.dumps({"error": "Either 'code' or 'path' must be provided."})
+
+    if code is None:
+        try:
+            p = Path(path).resolve()  # type: ignore[arg-type]  # guarded by None check above
+            if not p.is_file():
+                return json.dumps({"error": f"Not a file: {path}"})
+            code = p.read_text(encoding="utf-8", errors="replace")
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    if mojo_version is None:
+        try:
+            proc = subprocess.run(
+                ["mojo", "--version"], capture_output=True, text=True, timeout=5
+            )
+            version_str = proc.stdout.strip().split()[1] if proc.stdout.strip() else "0.26.0"
+            parts = version_str.split(".")
+            mojo_version = ".".join(parts[:3])
+        except Exception:
+            mojo_version = "0.26.0"
+
+    issues = validate_code(code, mojo_version)
+    return json.dumps({"issues": issues, "count": len(issues)}, indent=2)

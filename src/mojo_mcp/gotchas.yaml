@@ -1,0 +1,123 @@
+version: "0.26.2"
+
+gotchas:
+  - id: variant-loop-hang
+    title: "Variant in loop causes extreme compile slowdown"
+    severity: critical
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "for\\s+.+\\n[\\s\\S]*?Variant"
+    error_pattern: null
+    timeout_pattern: true
+    description: "Using Variant inside a for loop causes the compiler to hang or take extremely long. Use struct-of-arrays dispatch instead."
+    fix: "Replace Variant dispatch in loops with a tag enum + separate arrays per type."
+    link: null
+
+  - id: no-module-level-mutable
+    title: "No module-level mutable variables"
+    severity: warning
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "^var\\s+\\w+"
+    error_pattern: "module-level variable .+ must be declared as"
+    timeout_pattern: false
+    description: "Mojo does not support mutable module-level variables."
+    fix: "Use `alias` for compile-time constants, or wrap in a struct with `__init__`."
+    link: null
+
+  - id: string-indexing
+    title: "String indexing unsupported"
+    severity: warning
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "\\w+\\[\\d+\\]"
+    error_pattern: "does not implement .+__getitem__"
+    timeout_pattern: false
+    description: "String indexing with [] is not supported in Mojo. Use .as_bytes() to access individual characters."
+    fix: "Replace `s[i]` with `s.as_bytes()[i]`."
+    link: null
+
+  - id: variant-reference-not-copy
+    title: "Variant returns references, not copies"
+    severity: critical
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "\\bget\\[.+\\]\\(\\)"
+    error_pattern: null
+    timeout_pattern: false
+    description: "Variant.get[T]() returns a reference, not a copy. Using the value after the Variant is modified leads to undefined behavior."
+    fix: "Use `.copy()` immediately after `.get[T]()` for owned binds."
+    link: null
+
+  - id: inline-array-init
+    title: "InlineArray requires all N slots initialized"
+    severity: warning
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "InlineArray\\["
+    error_pattern: "must be initialized"
+    timeout_pattern: false
+    description: "InlineArray[T, N] requires all N slots to be initialized at construction. Partial initialization is not allowed."
+    fix: "Initialize all slots explicitly, or use a factory function that fills all N values."
+    link: null
+
+  - id: no-match-enum
+    title: "No match/enum support"
+    severity: info
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "\\bmatch\\s+"
+    error_pattern: "unexpected token 'match'"
+    timeout_pattern: false
+    description: "Mojo does not have match/enum support yet (deferred beyond 1.0). Use if/elif chains or Variant."
+    fix: "Use if/elif chains with isa[] checks, or a struct-based tag dispatch pattern."
+    link: null
+
+  - id: dtypepointer-deprecated
+    title: "DTypePointer deprecated in favor of UnsafePointer"
+    severity: warning
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "\\bDTypePointer\\b"
+    error_pattern: "DTypePointer.+deprecated"
+    timeout_pattern: false
+    description: "DTypePointer is deprecated since Mojo 25.4. Use UnsafePointer instead."
+    fix: "Replace `DTypePointer[dtype]` with `UnsafePointer[Scalar[dtype]]`."
+    link: null
+
+  - id: slow-compilation-hint
+    title: "Large file may cause slow compilation"
+    severity: info
+    mojo_versions: [">=0.26.0"]
+    code_pattern: null
+    error_pattern: null
+    timeout_pattern: true
+    description: "Mojo compilation can take 60-90s for complex files. Consider precompiling stable code into .mojopkg."
+    fix: "Split stable code into a package: `mojo package mylib/ -o mylib.mojopkg`, then import it."
+    link: null
+
+  - id: init-moveinit-confusion
+    title: "__init__ vs __moveinit__ confusion"
+    severity: warning
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "fn __moveinit__"
+    error_pattern: null
+    timeout_pattern: false
+    description: "Mojo distinguishes __init__ (construction), __copyinit__ (copy), and __moveinit__ (move). Implementing __moveinit__ without __copyinit__ means the type cannot be copied, only moved."
+    fix: "Implement both __copyinit__ and __moveinit__ unless you explicitly want a move-only type."
+    link: null
+
+  - id: for-loop-reference
+    title: "For loop variable is a reference, not a copy"
+    severity: warning
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "for\\s+\\w+\\s+in\\s+"
+    error_pattern: null
+    timeout_pattern: false
+    description: "In Mojo, `for x in collection` binds x as a reference. Modifying the collection during iteration is undefined behavior."
+    fix: "If you need to modify elements, use index-based iteration. If you need a copy, explicitly copy: `var local = x[].copy()`."
+    link: null
+
+  - id: integer-overflow-ub
+    title: "Integer overflow is undefined behavior"
+    severity: critical
+    mojo_versions: [">=0.26.0"]
+    code_pattern: null
+    error_pattern: "integer overflow"
+    timeout_pattern: false
+    description: "Mojo integer overflow is undefined behavior with no runtime check by default. This can cause silent corruption."
+    fix: "Use checked arithmetic or enable overflow checks with `-D ASSERT=all` during development."
+    link: null
