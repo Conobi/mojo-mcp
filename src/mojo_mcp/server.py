@@ -20,7 +20,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 
 from .docs import fetch_changelog, fetch_symbol_page, get_docs
-from .sandbox import run_execute, run_install_mojo, run_list_files, run_mojo_version, run_read_file, run_search, run_update_server
+from .sandbox import run_execute, run_install_mojo, run_list_files, run_mojo_version, run_read_file, run_search, run_update_server, run_validate
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -237,6 +237,36 @@ CHANGELOG_TOOL = types.Tool(
 )
 
 
+VALIDATE_TOOL = types.Tool(
+    name="validate",
+    description=(
+        "Validate Mojo source code against known gotcha patterns before compilation. "
+        "Checks for common pitfalls: Variant in loops (compile hang), module-level vars, "
+        "deprecated APIs, missing initializers, and more. "
+        "Pass `code` for in-memory validation or `path` to check a file on disk. "
+        "Returns a list of issues with severity, description, and fix suggestions."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "code": {
+                "type": "string",
+                "description": "Mojo source code to validate.",
+            },
+            "path": {
+                "type": "string",
+                "description": "Path to a .mojo file to validate. Ignored if code is provided.",
+            },
+            "mojo_version": {
+                "type": "string",
+                "description": "Mojo version for filtering patterns (e.g. '0.26.2'). Auto-detected if omitted.",
+            },
+        },
+        "required": [],
+    },
+)
+
+
 @app.list_tools()
 async def list_tools() -> list[types.Tool]:
     return [
@@ -249,6 +279,7 @@ async def list_tools() -> list[types.Tool]:
         LIST_FILES_TOOL,
         LOOKUP_TOOL,
         CHANGELOG_TOOL,
+        VALIDATE_TOOL,
     ]
 
 
@@ -300,6 +331,15 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
     elif name == "changelog":
         result = await fetch_changelog(arguments.get("version"))
+
+    elif name == "validate":
+        result = await loop.run_in_executor(
+            None,
+            run_validate,
+            arguments.get("code"),
+            arguments.get("path"),
+            arguments.get("mojo_version"),
+        )
 
     else:
         raise ValueError(f"Unknown tool: {name}")
