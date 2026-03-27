@@ -176,3 +176,14 @@ gotchas:
     description: "The .🔥 (flame) and 📦 (package) emoji file extensions are no longer supported in Mojo 0.26.2. Use .mojo for source files and __init__.mojo for packages."
     fix: "Rename .🔥 files to .mojo and 📦 files to __init__.mojo."
     link: null
+
+  - id: parallelize-heap-serializes
+    title: "parallelize() serializes when work functions do heap allocation"
+    severity: critical
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "parallelize\\[.*\\]\\(.*\\)"
+    error_pattern: null
+    timeout_pattern: false
+    description: "parallelize() achieves real multi-core speedup (3-4x) for compute-only closures, but shows 99% single-core usage when the work function does heap allocation (alloc, List append, struct construction). The Mojo runtime's memory allocator likely holds a global lock that serializes threads. Mojo's concurrency model is still in development — parallelize is 'not really a safe construct' for general-purpose concurrent code."
+    fix: "For compute-only work (SIMD, math, reading from pre-allocated buffers): parallelize works well. For work that allocates memory: pre-allocate ALL memory before the parallel phase, or use os.process.Process for process-level isolation (each process gets its own allocator). Avoid allocating, cloning, or constructing structs inside @parameter closures passed to parallelize."
+    link: "https://github.com/modular/modular/issues/1660"
