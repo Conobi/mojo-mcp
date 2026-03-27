@@ -187,3 +187,14 @@ gotchas:
     description: "parallelize() achieves real multi-core speedup (3-4x) for compute-only closures, but shows 99% single-core usage when the work function does heap allocation (alloc, List append, struct construction). The Mojo runtime's memory allocator likely holds a global lock that serializes threads. Mojo's concurrency model is still in development — parallelize is 'not really a safe construct' for general-purpose concurrent code."
     fix: "For compute-only work (SIMD, math, reading from pre-allocated buffers): parallelize works well. For work that allocates memory: pre-allocate ALL memory before the parallel phase, or use os.process.Process for process-level isolation (each process gets its own allocator). Avoid allocating, cloning, or constructing structs inside @parameter closures passed to parallelize."
     link: "https://github.com/modular/modular/issues/1660"
+
+  - id: many-types-compile-hang
+    title: "Compilation hangs when many distinct struct types are used in one file"
+    severity: critical
+    mojo_versions: [">=0.26.0"]
+    code_pattern: null
+    error_pattern: null
+    timeout_pattern: true
+    description: "Mojo's compilation time scales super-linearly with the number of distinct struct types instantiated in one file. A file importing and using 8+ different struct types (each with methods like predict/update/reset) can cause the compiler to take 5+ minutes or appear to hang. This is due to LLVM code generation overhead from monomorphization of many generic types."
+    fix: "Split large test/source files that use many different struct types into smaller files, each using 2-4 types. For test suites, create separate test files per module (test_ngram.mojo, test_match.mojo) instead of one monolithic file. Keep each .mojo file focused on a single module or 2-3 closely related types."
+    link: null
