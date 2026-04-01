@@ -164,6 +164,6 @@ To force a refresh, delete the relevant file.
 - `_parse_symbol_page` only parses the first-level method list; deeply nested overload detail is partial.
 - No authentication — all fetches are unauthenticated public docs.
 - `is_x86()` detection moved to `sys.info.CompilationTarget` in Mojo v25.5; the docs index does not yet expose struct methods, so `lookup` on `CompilationTarget` may be incomplete.
-- The `execute` tool requires a real `mojo` binary. If not installed: returns a helpful error pointing to `uv tool install modular`.
+- The `execute` tool requires a real `mojo` binary or `mojox`. If not installed: returns a helpful error pointing to `uv add mojox` or `uv tool install mojo`.
 - `execute` runs the subprocess from `cwd` (not `tmp_dir`) so `-I .` resolves against the project root; the temp file path is absolute so this is safe.
 - `execute` default timeout raised to 30 s (was 10 s) to accommodate project compilation.

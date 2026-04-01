@@ -31,14 +31,14 @@ def _find_mojo_version_file(cwd: str | None) -> tuple[Path | None, str | None]:
     return None, None
 
 
-def _mojo_cmd(version: str | None) -> list[str]:
+def _mojo_cmd(version: str | None, cwd: str | None = None) -> list[str]:
     """Return the mojo command prefix for a given version.
 
     With a version: uses uvx --from mojo-compiler==<version> mojo (cached per version).
       .mojo-version files use the modular version format (e.g. "25.6.0"), but
       mojo-compiler on PyPI uses a "0."-prefixed format (e.g. "0.25.6.0").
       We normalise automatically.
-    Without: uses the globally installed mojo binary (system PATH).
+    Without: uses mojox from the project venv if available, else system mojo.
     """
     if version:
         # Normalise "25.6.0" → "0.25.6.0" for mojo-compiler on PyPI.
@@ -46,7 +46,36 @@ def _mojo_cmd(version: str | None) -> list[str]:
         if not version.startswith("0."):
             version = f"0.{version}"
         return ["uvx", "--from", f"mojo-compiler=={version}", "mojo"]
+
+    # Check for mojox in the project's venv
+    if cwd:
+        mojox_bin = Path(cwd).resolve() / ".venv" / "bin" / "mojox"
+        if mojox_bin.is_file():
+            return [str(mojox_bin)]
+
+    # Fallback: system mojo
     return ["mojo"]
+
+
+def _find_mojo_packages(cwd: str | None) -> Path | None:
+    """Find the mojo_packages directory in the project's venv.
+
+    Returns the path if it exists and contains .mojopkg files, else None.
+    """
+    if not cwd:
+        return None
+    import glob
+    venv = Path(cwd).resolve() / ".venv"
+    if not venv.is_dir():
+        return None
+    # Search for mojo_packages in the venv's site-packages
+    pattern = str(venv / "lib" / "python*" / "site-packages" / "mojo_packages")
+    matches = glob.glob(pattern)
+    for match in matches:
+        pkg_dir = Path(match)
+        if pkg_dir.is_dir() and any(pkg_dir.glob("*.mojopkg")):
+            return pkg_dir
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -189,10 +218,17 @@ def run_execute(
         timeout:       Process timeout in seconds (default 30).
     """
     version_file, pinned_version = _find_mojo_version_file(cwd)
-    mojo_prefix = _mojo_cmd(pinned_version)
+    mojo_prefix = _mojo_cmd(pinned_version, cwd)
+
+    # Auto-inject installed Mojo packages from the project's venv.
+    # mojox does this automatically, but for version-pinned projects
+    # (which use bare mojo via uvx), we need to do it manually.
+    mojo_packages = _find_mojo_packages(cwd)
 
     # Build -I / -D flags
     extra_flags: list[str] = []
+    if mojo_packages:
+        extra_flags.extend(["-I", str(mojo_packages)])
     for path in (include_paths or []):
         extra_flags.extend(["-I", path])
     for key, val in (defines or {}).items():
@@ -211,6 +247,15 @@ def run_execute(
         with open(tmp_file, "w") as f:
             f.write(code)
 
+        # Build subprocess environment with library paths
+        import os
+        run_env = os.environ.copy()
+        if mojo_packages:
+            lib_dir = mojo_packages / "lib"
+            if lib_dir.is_dir():
+                existing = run_env.get("LD_LIBRARY_PATH", "")
+                run_env["LD_LIBRARY_PATH"] = f"{lib_dir}:{existing}" if existing else str(lib_dir)
+
         cmd = [*mojo_prefix, "run", *extra_flags, tmp_file]
         result = subprocess.run(
             cmd,
@@ -218,6 +263,7 @@ def run_execute(
             text=True,
             timeout=timeout,
             cwd=run_cwd or tmp_dir,
+            env=run_env,
         )
         output = {
             "stdout": result.stdout[:MAX_OUTPUT],
@@ -257,7 +303,8 @@ def run_execute(
             output = {
                 "error": (
                     "mojo binary not found. "
-                    "Install it with: uv tool install mojo  "
+                    "Install it with: uv add mojox  "
+                    "Or: uv tool install mojo  "
                     "Or call the install_mojo tool."
                 )
             }
