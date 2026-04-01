@@ -12,16 +12,22 @@ Designed for the **Code Mode** pattern: every tool returns structured text that 
 
 ```
 src/mojo_mcp/
-  __init__.py     — empty
-  server.py       — MCP server, tool definitions, call_tool routing
-  docs.py         — scraping, caching, symbol lookup, changelog
-  sandbox.py      — file I/O helpers and Mojo code execution
-pyproject.toml    — package, deps, entry point
-scripts/setup.sh  — install Mojo + sync deps
+  __init__.py      — empty
+  server.py        — MCP server, tool definitions, call_tool routing
+  docs.py          — scraping, caching, symbol lookup, changelog
+  sandbox.py       — file I/O helpers and Mojo code execution
+  gotchas.py       — gotcha pattern matching engine (validate + error enrichment)
+  gotchas.yaml     — known gotcha patterns database (version-filtered)
+tests/
+  conftest.py      — pytest fixtures, --run-mojo marker
+  test_gotchas.py  — gotcha loading and pattern matching tests
+  test_validate.py — validate tool unit tests
+  test_enrichment.py — execute error enrichment tests
+  test_integration.py — live Mojo integration tests (requires mojo)
+pyproject.toml     — package, deps, entry point
+scripts/setup.sh   — install Mojo + sync deps
 uv.lock
 ```
-
-No test suite yet. Verification is done with inline `uv run python -c` snippets.
 
 ---
 
@@ -29,12 +35,13 @@ No test suite yet. Verification is done with inline `uv run python -c` snippets.
 
 ```bash
 uv run mojo-mcp          # start via stdio (normal MCP usage)
-uv run python -c "..."   # quick in-process tests
+uv run pytest             # run unit tests
+uv run pytest --run-mojo  # run all tests including live Mojo integration
 ```
 
 ---
 
-## The Nine Tools
+## The Ten Tools
 
 All tools are defined as `types.Tool` constants in `server.py` and routed in `call_tool`.
 
@@ -46,15 +53,18 @@ All tools are defined as `types.Tool` constants in `server.py` and routed in `ca
 - **Note:** No imports available inside the snippet. Must use `return`.
 
 ### 2. `execute`
-- **Input:** `code` — complete Mojo source file (must have `fn main()`)
+- **Input:** `code` — complete Mojo source file (must have `def main()`)
 - **Optional inputs:**
   - `cwd` — working directory for the subprocess (relative paths like `-I .` resolve from here); also used to locate `.mojo-version`
   - `include_paths` — list of strings passed as `-I` flags (e.g. `["."]` to import local packages)
   - `defines` — dict of compile-time defines passed as `-D KEY=VALUE` (e.g. `{"ASSERT": "all"}`)
   - `timeout` — process timeout in seconds (default 30)
 - **Backend:** `sandbox.run_execute(code, cwd, include_paths, defines, timeout)` — writes to `mkdtemp`, runs `mojo run [flags] <file>` from `cwd`
+- **Compiler resolution (`_mojo_cmd`):** pinned version → `uvx --from mojo-compiler==<ver> mojo`; no pin → `mojox` from project `.venv/bin/` if present; fallback → system `mojo`
+- **mojox pipeline:** when `cwd` has a venv with `mojox`, it's used as the compiler frontend (auto-discovers installed Mojo packages). For version-pinned projects (bare `mojo` via uvx), `_find_mojo_packages()` manually injects `-I` for `mojo_packages/` and sets `LD_LIBRARY_PATH` for native libs.
+- **Error enrichment:** failed executions and timeouts are automatically enriched with matching gotcha hints via `gotchas.enrich_error()`
 - **Key fix:** subprocess `cwd` is set to the user's `cwd` (not `tmp_dir`) so that `-I .` resolves against the project root
-- **Returns:** `{stdout, stderr, returncode[, mojo_version, version_file]}` JSON
+- **Returns:** `{stdout, stderr, returncode[, mojo_version, version_file, gotcha_hints]}` JSON
 - **Typical project test:** `execute(code=..., cwd="/path/to/project", include_paths=["."], defines={"ASSERT": "all"})`
 
 ### 3. `read_file`
@@ -89,6 +99,13 @@ All tools are defined as `types.Tool` constants in `server.py` and routed in `ca
   - `"nightly"` → exact key `"nightly"`
   - `"v26.1"` fuzzy-matches `"v0.26.1"` by stripping leading zeros
 - **Returns:** Markdown with H2 version heading + H3 subsections + bullet lists
+
+### 7. `validate`
+- **Input:** `code` (Mojo source string), `path` (file path, ignored if code provided), `mojo_version` (optional, auto-detected)
+- **Backend:** `sandbox.run_validate(code, path, mojo_version)` → `gotchas.validate_code()`
+- **Pattern database:** `gotchas.yaml` — each entry has `id`, `severity`, `mojo_versions` (semver filter), `code_pattern` (regex), `error_pattern`, `timeout_pattern`, `description`, `fix`
+- **Returns:** `{issues: [{id, title, severity, description, fix, link?}], count}` JSON
+- **Also used by:** `execute` tool — failed executions and timeouts are automatically enriched with matching gotcha hints via `gotchas.enrich_error()`
 
 ---
 
@@ -133,8 +150,9 @@ Each Mojo version is a `<section>` element whose **direct** first child is an `<
 | `httpx>=0.27` | Async HTTP for docs/changelog fetches |
 | `beautifulsoup4>=4.12` | HTML parsing |
 | `lxml>=5.0` | Fast BS4 backend (must be installed separately) |
+| `pyyaml>=6.0` | Gotchas YAML parsing |
 
-No optional extras. No dev dependencies defined yet (no test runner, no linter config).
+Dev dependencies (`[project.optional-dependencies] dev`): `pytest>=8.0`, `pytest-asyncio>=0.23`.
 
 ---
 

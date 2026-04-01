@@ -16,7 +16,7 @@ class TestExecuteEnrichment:
             stderr="error: module-level variable 'x' must be declared as 'alias'\n",
             returncode=1,
         )
-        result = json.loads(run_execute("var x = 10\nfn main(): pass\n"))
+        result = json.loads(run_execute("var x = 10\ndef main(): pass\n"))
         assert result["returncode"] == 1
         assert "gotcha_hints" in result
         ids = [h["id"] for h in result["gotcha_hints"]]
@@ -41,7 +41,7 @@ class TestExecuteEnrichment:
             stderr="",
             returncode=0,
         )
-        result = json.loads(run_execute("fn main():\n    print('hello')\n"))
+        result = json.loads(run_execute("def main():\n    print('hello')\n"))
         assert result["returncode"] == 0
         assert "gotcha_hints" not in result
 
@@ -53,7 +53,7 @@ class TestExecuteEnrichment:
             stderr="error: 'String' does not implement the '__getitem__' method\n",
             returncode=1,
         )
-        result = json.loads(run_execute("fn main():\n    var s = 'hi'\n    print(s[0])\n"))
+        result = json.loads(run_execute("def main():\n    var s = 'hi'\n    print(s[0])\n"))
         assert "gotcha_hints" in result
         ids = [h["id"] for h in result["gotcha_hints"]]
         assert "string-indexing" in ids
@@ -66,7 +66,7 @@ class TestExecuteEnrichment:
             stderr="error: module-level variable 'x' must be declared as 'alias'\n",
             returncode=1,
         )
-        result = json.loads(run_execute("var x = 10\nfn main(): pass\n"))
+        result = json.loads(run_execute("var x = 10\ndef main(): pass\n"))
         hint = result["gotcha_hints"][0]
         assert "id" in hint
         assert "title" in hint
