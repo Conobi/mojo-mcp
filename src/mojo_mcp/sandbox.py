@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Any
 
 MAX_OUTPUT = 8192  # 8KB cap to avoid flooding context
 
@@ -241,6 +242,7 @@ def run_execute(
     # the temp dir (keeps backward-compatibility for standalone snippets).
     run_cwd = str(Path(cwd).resolve()) if cwd else None
 
+    output: dict[str, Any]
     tmp_dir = tempfile.mkdtemp(prefix="mojo-mcp-")
     tmp_file = f"{tmp_dir}/main.mojo"
     try:
@@ -509,7 +511,8 @@ def run_validate(
 
     if code is None:
         try:
-            p = Path(path).resolve()  # type: ignore[arg-type]  # guarded by None check above
+            assert path is not None  # guarded by check above
+            p = Path(path).resolve()
             if not p.is_file():
                 return json.dumps({"error": f"Not a file: {path}"})
             code = p.read_text(encoding="utf-8", errors="replace")
