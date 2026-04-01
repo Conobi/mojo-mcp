@@ -9,6 +9,7 @@ Tools exposed:
   list_files(path)                         — list .mojo files in a directory
   lookup(query)                            — fetch full symbol docs
   changelog(version)                       — get Mojo changelog
+  validate(code, path, mojo_version)       — check code against known gotcha patterns
 """
 
 import asyncio
@@ -219,7 +220,7 @@ LOOKUP_TOOL = types.Tool(
 CHANGELOG_TOOL = types.Tool(
     name="changelog",
     description=(
-        "Get the Mojo changelog. Cached for 1 hour. "
+        "Get the Mojo changelog. Cached for 7 days. "
         "No version → latest 2 releases. "
         "Pass version to filter: 'nightly', 'v26.1', 'v0.26.1', 'v25.5'. "
         "Returns Markdown with language and stdlib changes."
