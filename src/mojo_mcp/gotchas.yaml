@@ -188,6 +188,50 @@ gotchas:
     fix: "For compute-only work (SIMD, math, reading from pre-allocated buffers): parallelize works well. For work that allocates memory: pre-allocate ALL memory before the parallel phase, or use os.process.Process for process-level isolation (each process gets its own allocator). Avoid allocating, cloning, or constructing structs inside @parameter closures passed to parallelize."
     link: "https://github.com/modular/modular/issues/1660"
 
+  - id: unsafepointer-alloc-removed
+    title: "UnsafePointer.alloc() static method does not exist"
+    severity: warning
+    mojo_versions: [">=0.26.2"]
+    code_pattern: "UnsafePointer\\[.+\\]\\.alloc\\("
+    error_pattern: "has no member 'alloc'"
+    timeout_pattern: false
+    description: "UnsafePointer[T].alloc(N) does not exist in Mojo 0.26.2. The allocation free function must be imported from std.memory.unsafe_pointer."
+    fix: "Use `from std.memory.unsafe_pointer import alloc` then `alloc[T](N)`. For FFI pointers, chain `.as_any_origin()` to get `UnsafePointer[T, MutAnyOrigin]`."
+    link: null
+
+  - id: unsafepointer-origin-required
+    title: "UnsafePointer parameters need explicit MutAnyOrigin"
+    severity: warning
+    mojo_versions: [">=0.26.2"]
+    code_pattern: "UnsafePointer\\[\\w+\\](?!,)"
+    error_pattern: "origin.*infer|cannot infer.*origin"
+    timeout_pattern: false
+    description: "Function parameters typed as bare `UnsafePointer[T]` fail origin inference in Mojo 0.26.2. The origin must be specified explicitly, especially in FFI wrapper methods."
+    fix: "Replace `UnsafePointer[T]` with `UnsafePointer[T, MutAnyOrigin]` in function parameter signatures."
+    link: null
+
+  - id: list-variadic-construction
+    title: "List variadic construction does not work"
+    severity: warning
+    mojo_versions: [">=0.26.2"]
+    code_pattern: "List\\[.+\\]\\(.+,.+\\)"
+    error_pattern: null
+    timeout_pattern: false
+    description: "List[T](val1, val2, val3) variadic construction does not compile in Mojo 0.26.2. There is no variadic initializer for List."
+    fix: "Create an empty list and append element by element, or allocate a heap buffer with `alloc[T](N)` and write elements via indexing."
+    link: null
+
+  - id: tuple-return-string
+    title: "Tuple return types with String do not work"
+    severity: warning
+    mojo_versions: [">=0.26.2"]
+    code_pattern: "->\\s*\\(String"
+    error_pattern: "Tuple.*String|cannot construct"
+    timeout_pattern: false
+    description: "Returning tuples containing String (e.g., `-> (String, String, String)`) does not compile in Mojo 0.26.2. Tuple construction with non-trivial types fails."
+    fix: "Return a `List[String]` instead and access elements by index: `result[0]`, `result[1]`, etc."
+    link: null
+
   - id: many-types-compile-hang
     title: "Compilation hangs when many distinct struct types are used in one file"
     severity: critical
