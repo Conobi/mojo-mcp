@@ -12,9 +12,9 @@ class TestLoadGotchas:
         gotchas = load_gotchas()
         assert isinstance(gotchas, list)
 
-    def test_load_has_18_entries(self):
+    def test_load_has_22_entries(self):
         gotchas = load_gotchas()
-        assert len(gotchas) == 18
+        assert len(gotchas) == 22
 
     def test_all_entries_have_required_fields(self):
         gotchas = load_gotchas()
