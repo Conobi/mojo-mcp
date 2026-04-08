@@ -1,0 +1,22 @@
+{
+  "name": "mojo-lsp",
+  "description": "Mojo language server integration. Provides go-to-definition, find-references, hover, and diagnostics in .mojo files via mojo-lsp-server.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Conobi",
+    "url": "https://github.com/Conobi"
+  },
+  "homepage": "https://github.com/Conobi/mojo-mcp",
+  "repository": "https://github.com/Conobi/mojo-mcp",
+  "license": "MIT",
+  "keywords": ["mojo", "lsp", "language-server", "modular"],
+  "lspServers": {
+    "mojo": {
+      "command": "uvx",
+      "args": ["--from", "mojo", "mojo-lsp-server"],
+      "extensionToLanguage": {
+        ".mojo": "mojo"
+      }
+    }
+  }
+}
