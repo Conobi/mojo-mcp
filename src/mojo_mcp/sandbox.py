@@ -23,6 +23,25 @@ def _json(obj: Any) -> str:
     return json.dumps(obj, separators=(",", ":"), default=str)
 
 
+def _extract_error_summary(stderr: str) -> str | None:
+    """Extract the first error line from Mojo compiler output.
+
+    Mojo errors typically appear as:
+      - 'error: <message>'
+      - '/path/to/file.mojo:3:5: error: <message>'
+    Falls back to the first warning line if no error is found.
+    """
+    for line in stderr.splitlines():
+        stripped = line.strip()
+        if re.search(r"\berror:", stripped, re.IGNORECASE):
+            return stripped
+    for line in stderr.splitlines():
+        stripped = line.strip()
+        if re.search(r"\bwarning:", stripped, re.IGNORECASE):
+            return stripped
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Mojo version resolution helpers
 # ---------------------------------------------------------------------------
@@ -332,6 +351,9 @@ def run_execute(
         # Enrich failed executions with gotcha hints
         if result.returncode != 0:
             output["hint"] = "Use validate(code=...) to check for known gotcha patterns."
+            summary = _extract_error_summary(result.stderr)
+            if summary:
+                output["error_summary"] = summary
             from .gotchas import enrich_error
             version_for_enrich = pinned_version or "0.26.0"
             parts = version_for_enrich.split(".")

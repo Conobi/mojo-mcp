@@ -167,7 +167,61 @@ class TestSearchWrapped:
         docs = {}
         code = "return 'x' * 10000"
         result = json.loads(run_search(code, docs))
-        assert "result_raw" in result or "result" in result
-        if "result_raw" in result:
-            assert result["truncated"] is True
-            assert "total_bytes" in result
+        assert "result_raw" in result
+        assert result["truncated"] is True
+        assert result["total_bytes"] > 8192
+        assert "hint" in result
+
+
+from mojo_mcp.sandbox import _extract_error_summary
+
+
+class TestExtractErrorSummary:
+    def test_simple_error(self):
+        stderr = "error: use of undefined value 'x'\n"
+        assert _extract_error_summary(stderr) == "error: use of undefined value 'x'"
+
+    def test_file_prefixed_error(self):
+        stderr = "/tmp/main.mojo:3:5: error: invalid syntax\nnote: see docs\n"
+        result = _extract_error_summary(stderr)
+        assert result is not None
+        assert "error:" in result
+
+    def test_warning_fallback(self):
+        stderr = "warning: unused variable 'x'\n"
+        result = _extract_error_summary(stderr)
+        assert result is not None
+        assert "warning:" in result
+
+    def test_empty_stderr(self):
+        assert _extract_error_summary("") is None
+
+    def test_no_error_no_warning(self):
+        assert _extract_error_summary("some random output\n") is None
+
+    def test_multiline_picks_first_error(self):
+        stderr = "note: compiling...\n/tmp/main.mojo:1:1: error: first\n/tmp/main.mojo:5:1: error: second\n"
+        result = _extract_error_summary(stderr)
+        assert result is not None
+        assert "first" in result
+
+
+class TestExecuteErrorSummary:
+    @patch("mojo_mcp.sandbox.subprocess.run")
+    @patch("mojo_mcp.sandbox.shutil.rmtree")
+    def test_failure_has_error_summary(self, mock_rmtree, mock_run):
+        mock_run.return_value = MagicMock(
+            stdout="",
+            stderr="/tmp/main.mojo:3:5: error: invalid syntax\nnote: see above\n",
+            returncode=1,
+        )
+        result = json.loads(run_execute("bad code\n"))
+        assert "error_summary" in result
+        assert "error:" in result["error_summary"]
+
+    @patch("mojo_mcp.sandbox.subprocess.run")
+    @patch("mojo_mcp.sandbox.shutil.rmtree")
+    def test_success_no_error_summary(self, mock_rmtree, mock_run):
+        mock_run.return_value = MagicMock(stdout="ok\n", stderr="", returncode=0)
+        result = json.loads(run_execute("def main(): pass\n"))
+        assert "error_summary" not in result
