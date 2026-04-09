@@ -225,3 +225,48 @@ class TestExecuteErrorSummary:
         mock_run.return_value = MagicMock(stdout="ok\n", stderr="", returncode=0)
         result = json.loads(run_execute("def main(): pass\n"))
         assert "error_summary" not in result
+
+
+from mojo_mcp.sandbox import run_read_file, READ_FILE_MAX_BYTES
+
+
+class TestReadFileHints:
+    def test_mojo_file_has_validate_hint(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".mojo", delete=False) as f:
+            f.write("def main(): pass\n")
+            f.flush()
+            result = json.loads(run_read_file(f.name))
+        Path(f.name).unlink()
+        assert "hint" in result
+        assert "validate" in result["hint"]
+
+    def test_non_mojo_file_no_hint(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("hello\n")
+            f.flush()
+            result = json.loads(run_read_file(f.name))
+        Path(f.name).unlink()
+        assert "hint" not in result
+
+    def test_truncated_has_metadata(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".mojo", delete=False) as f:
+            f.write("x" * (READ_FILE_MAX_BYTES + 1000))
+            f.flush()
+            result = json.loads(run_read_file(f.name))
+        Path(f.name).unlink()
+        assert result["truncated"] is True
+        assert "total_bytes" in result
+        assert result["total_bytes"] > READ_FILE_MAX_BYTES
+        assert "hint" in result
+        assert "KB" in result["hint"]
+        # Should NOT have the old inline truncation text
+        assert "[Truncated at" not in result["content"]
+
+    def test_truncated_mojo_has_combined_hint(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".mojo", delete=False) as f:
+            f.write("x" * (READ_FILE_MAX_BYTES + 1000))
+            f.flush()
+            result = json.loads(run_read_file(f.name))
+        Path(f.name).unlink()
+        assert "validate" in result["hint"]
+        assert "KB" in result["hint"]
