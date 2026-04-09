@@ -20,3 +20,28 @@ class TestJsonHelper:
         result = _json({"a": [1, 2, 3]})
         assert "\n" not in result
         assert "  " not in result
+
+
+from mojo_mcp.sandbox import run_validate
+
+
+class TestValidateHints:
+    def test_clean_code_has_message_and_hint(self):
+        result = json.loads(run_validate(code="def main():\n    print('hi')\n"))
+        assert result["count"] == 0
+        assert "message" in result
+        assert "No known gotcha patterns matched" in result["message"]
+        assert "hint" in result
+        assert "execute" in result["hint"]
+
+    def test_issues_found_has_hint(self):
+        result = json.loads(run_validate(code="var x = 10\ndef main():\n    pass\n"))
+        assert result["count"] > 0
+        assert "hint" in result
+        assert "execute" in result["hint"]
+
+    def test_error_has_hint(self):
+        result = json.loads(run_validate())
+        assert "error" in result
+        assert "hint" in result
+        assert "validate(" in result["hint"]

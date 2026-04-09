@@ -519,7 +519,10 @@ def run_validate(
     from .gotchas import validate_code
 
     if code is None and path is None:
-        return _json({"error": "Either 'code' or 'path' must be provided."})
+        return _json({
+            "error": "Either 'code' or 'path' must be provided.",
+            "hint": "validate(code='fn main(): ...') or validate(path='/path/to/file.mojo')",
+        })
 
     if code is None:
         try:
@@ -543,4 +546,10 @@ def run_validate(
             mojo_version = "0.26.0"
 
     issues = validate_code(code, mojo_version)
-    return _json({"issues": issues, "count": len(issues)})
+    output: dict[str, Any] = {"issues": issues, "count": len(issues)}
+    if issues:
+        output["hint"] = "Fix the issues above, then use execute(code=...) to test."
+    else:
+        output["message"] = "No known gotcha patterns matched."
+        output["hint"] = "Code looks clean. Use execute(code=...) to run it."
+    return _json(output)
