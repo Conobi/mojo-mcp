@@ -315,3 +315,16 @@ class TestUpdateServerHint:
         result = json.loads(run_update_server())
         assert "hint" in result
         assert "next_step" not in result
+
+
+import pytest
+
+
+class TestCallToolErrorHint:
+    @pytest.mark.asyncio
+    async def test_unknown_tool_has_hint(self):
+        from mojo_mcp.server import call_tool
+        result = await call_tool("nonexistent_tool", {})
+        parsed = json.loads(result[0].text)
+        assert "error" in parsed
+        assert "hint" in parsed
