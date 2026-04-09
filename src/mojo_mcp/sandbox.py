@@ -203,7 +203,7 @@ READ_FILE_MAX_BYTES = 100_000
 
 
 def run_read_file(path: str) -> str:
-    """Read a file; return JSON {path, content} or {error}."""
+    """Read a file; return JSON {path, content} with optional truncation metadata and hints."""
     _BLOCKED = {Path("/etc"), Path("/proc"), Path("/sys"), Path("/dev")}
     try:
         p = Path(path).resolve()
@@ -218,9 +218,18 @@ def run_read_file(path: str) -> str:
         raw = p.read_bytes()
         content = raw[:READ_FILE_MAX_BYTES].decode("utf-8", errors="replace")
         truncated = len(raw) > READ_FILE_MAX_BYTES
+        output: dict[str, Any] = {"path": str(p), "content": content}
         if truncated:
-            content += f"\n\n[Truncated at {READ_FILE_MAX_BYTES} bytes]"
-        return _json({"path": str(p), "content": content})
+            output["truncated"] = True
+            output["total_bytes"] = len(raw)
+            hint_parts = [f"File is {len(raw) // 1024}KB (truncated at {READ_FILE_MAX_BYTES // 1024}KB)."]
+            hint_parts.append("Use the host's file reading tool with offset to see the rest.")
+            if str(p).endswith(".mojo"):
+                hint_parts.append(f"Use validate(path='{p}') to check for known issues.")
+            output["hint"] = " ".join(hint_parts)
+        elif str(p).endswith(".mojo"):
+            output["hint"] = f"Use validate(path='{p}') to check this file for known issues."
+        return _json(output)
     except Exception as e:
         return _json({"error": str(e)})
 
