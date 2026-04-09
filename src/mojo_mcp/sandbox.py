@@ -100,9 +100,10 @@ def run_search(code: str, docs: dict) -> str:
 
     The agent's code runs in a restricted exec() with no imports or I/O.
     It receives `docs` as its only variable and must return a value.
+    Returns a wrapped result: {"result": ..., "hint": ...}.
     """
 
-    def _exec() -> str:
+    def _exec() -> Any:
         restricted_builtins = {
             "len": len,
             "list": list,
@@ -136,17 +137,43 @@ def run_search(code: str, docs: dict) -> str:
         wrapped = f"def _search(docs):\n{indented}\n_result = _search(docs)"
 
         exec(wrapped, global_ns, local_ns)  # noqa: S102
-        return json.dumps(local_ns.get("_result"), indent=2, default=str)
+        return local_ns.get("_result")
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(_exec)
-        try:
-            result = future.result(timeout=5)
-            return result[:MAX_OUTPUT]
-        except concurrent.futures.TimeoutError:
-            return _json({"error": "search timed out after 5 seconds"})
-        except Exception as e:
-            return _json({"error": str(e)})
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(_exec)
+    try:
+        result_data = future.result(timeout=5)
+    except concurrent.futures.TimeoutError:
+        executor.shutdown(wait=False)
+        return _json({"error": "search timed out after 5 seconds"})
+    except Exception as e:
+        executor.shutdown(wait=False)
+        return _json({"error": str(e)})
+    else:
+        executor.shutdown(wait=False)
+
+    if result_data is None:
+        return _json({
+            "result": None,
+            "message": "Search returned no results.",
+            "hint": "Try broader terms, or use lookup('module.Symbol') if you know the name.",
+        })
+
+    raw = json.dumps(result_data, separators=(",", ":"), default=str)
+    truncated = len(raw) > MAX_OUTPUT
+
+    if truncated:
+        return _json({
+            "result_raw": raw[:MAX_OUTPUT],
+            "truncated": True,
+            "total_bytes": len(raw),
+            "hint": "Result was truncated. Narrow your query to reduce output.",
+        })
+
+    return _json({
+        "result": result_data,
+        "hint": "Use lookup('<package>.<module>.<Symbol>') for full docs on any symbol.",
+    })
 
 
 # ---------------------------------------------------------------------------

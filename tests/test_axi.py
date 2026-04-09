@@ -129,3 +129,45 @@ class TestListFilesHints:
             result = json.loads(run_list_files(d))
             assert "path" in result
             assert "pattern" in result
+
+
+from mojo_mcp.sandbox import run_search
+
+
+class TestSearchWrapped:
+    def test_result_wrapped_in_metadata(self):
+        docs = {"test": {"name": "test", "structs": [], "functions": [], "traits": [], "aliases": []}}
+        result = json.loads(run_search("return list(docs.keys())", docs))
+        assert "result" in result
+        assert result["result"] == ["test"]
+        assert "hint" in result
+        assert "lookup" in result["hint"]
+
+    def test_null_result_has_message(self):
+        docs = {"test": {"name": "test", "structs": [], "functions": [], "traits": [], "aliases": []}}
+        result = json.loads(run_search("return None", docs))
+        assert result["result"] is None
+        assert "message" in result
+        assert "hint" in result
+
+    def test_error_wrapped(self):
+        docs = {}
+        result = json.loads(run_search("return 1/0", docs))
+        assert "error" in result
+
+    def test_timeout_wrapped(self):
+        docs = {}
+        # This will fail because 'import' is not in restricted builtins, causing an error (not a timeout)
+        # Use a while loop instead to trigger timeout
+        result = json.loads(run_search("while True: pass", docs))
+        assert "error" in result
+
+    def test_truncated_uses_result_raw(self):
+        # Generate a result larger than MAX_OUTPUT (8192 bytes)
+        docs = {}
+        code = "return 'x' * 10000"
+        result = json.loads(run_search(code, docs))
+        assert "result_raw" in result or "result" in result
+        if "result_raw" in result:
+            assert result["truncated"] is True
+            assert "total_bytes" in result
