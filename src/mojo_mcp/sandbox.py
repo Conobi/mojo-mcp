@@ -2,13 +2,25 @@
 
 import concurrent.futures
 import json
+import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
 MAX_OUTPUT = 8192  # 8KB cap to avoid flooding context
+
+
+def _json(obj: Any) -> str:
+    """Compact JSON serialization for tool responses.
+
+    Uses default=str to handle Path objects and other non-JSON types.
+    This is intentional for a response serializer but may mask bugs
+    where unexpected types leak into the output dict.
+    """
+    return json.dumps(obj, separators=(",", ":"), default=str)
 
 
 # ---------------------------------------------------------------------------
@@ -132,9 +144,9 @@ def run_search(code: str, docs: dict) -> str:
             result = future.result(timeout=5)
             return result[:MAX_OUTPUT]
         except concurrent.futures.TimeoutError:
-            return json.dumps({"error": "search timed out after 5 seconds"})
+            return _json({"error": "search timed out after 5 seconds"})
         except Exception as e:
-            return json.dumps({"error": str(e)})
+            return _json({"error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -152,19 +164,19 @@ def run_read_file(path: str) -> str:
         for blocked in _BLOCKED:
             try:
                 p.relative_to(blocked)
-                return json.dumps({"error": f"Access denied: {blocked}"})
+                return _json({"error": f"Access denied: {blocked}"})
             except ValueError:
                 pass
         if not p.is_file():
-            return json.dumps({"error": f"Not a file: {path}"})
+            return _json({"error": f"Not a file: {path}"})
         raw = p.read_bytes()
         content = raw[:READ_FILE_MAX_BYTES].decode("utf-8", errors="replace")
         truncated = len(raw) > READ_FILE_MAX_BYTES
         if truncated:
             content += f"\n\n[Truncated at {READ_FILE_MAX_BYTES} bytes]"
-        return json.dumps({"path": str(p), "content": content})
+        return _json({"path": str(p), "content": content})
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _json({"error": str(e)})
 
 
 LIST_FILES_MAX_ENTRIES = 200
@@ -177,18 +189,18 @@ def run_list_files(path: str, pattern: str = "**/*.mojo") -> str:
     try:
         base = Path(path).resolve()
         if not base.is_dir():
-            return json.dumps({"error": f"Not a directory: {path}"})
+            return _json({"error": f"Not a directory: {path}"})
         gen = base.glob(pattern)
         entries = sorted(str(f) for f in itertools.islice(gen, LIST_FILES_MAX_ENTRIES + 1))
         truncated = len(entries) > LIST_FILES_MAX_ENTRIES
-        return json.dumps({
+        return _json({
             "path": str(base),
             "pattern": pattern,
             "files": entries[:LIST_FILES_MAX_ENTRIES],
             "truncated": truncated,
         })
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _json({"error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +327,7 @@ def run_execute(
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    return json.dumps(output, indent=2)
+    return _json(output)
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +364,7 @@ def run_mojo_version(path: str | None = None) -> str:
     result["pinned_version"] = pinned_version
     result["version_file"] = str(version_file) if version_file else None
 
-    return json.dumps(result, indent=2)
+    return _json(result)
 
 
 _GITHUB_URL = "git+https://github.com/Conobi/mojo-mcp"
@@ -366,7 +378,7 @@ def run_update_server() -> str:
     """
     uv_path = shutil.which("uv") or shutil.which("uvx")
     if not uv_path:
-        return json.dumps({
+        return _json({
             "error": "uv not found. Install it: https://docs.astral.sh/uv/getting-started/installation/"
         })
 
@@ -378,21 +390,21 @@ def run_update_server() -> str:
             timeout=120,
         )
         if proc.returncode == 0:
-            return json.dumps({
+            return _json({
                 "status": "updated",
                 "version": proc.stdout.strip() or proc.stderr.strip(),
                 "next_step": "Restart Claude Code to load the new version.",
             })
-        return json.dumps({
+        return _json({
             "error": "update failed",
             "stdout": proc.stdout[:MAX_OUTPUT],
             "stderr": proc.stderr[:MAX_OUTPUT],
             "returncode": proc.returncode,
         })
     except subprocess.TimeoutExpired:
-        return json.dumps({"error": "update timed out after 120 seconds"})
+        return _json({"error": "update timed out after 120 seconds"})
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _json({"error": str(e)})
 
 
 def run_install_mojo(version: str | None = None, project_path: str | None = None) -> str:
@@ -406,7 +418,7 @@ def run_install_mojo(version: str | None = None, project_path: str | None = None
     """
     uv_path = shutil.which("uv")
     if not uv_path:
-        return json.dumps({
+        return _json({
             "error": "uv not found. Install it: https://docs.astral.sh/uv/getting-started/installation/"
         })
 
@@ -414,15 +426,15 @@ def run_install_mojo(version: str | None = None, project_path: str | None = None
     if project_path is not None:
         proj = Path(project_path).resolve()
         if not proj.is_dir():
-            return json.dumps({"error": f"Not a directory: {project_path}"})
+            return _json({"error": f"Not a directory: {project_path}"})
         version_file = proj / ".mojo-version"
 
         if version is None:
             # Remove pin — revert to global
             if version_file.exists():
                 version_file.unlink()
-                return json.dumps({"status": "unpinned", "removed": str(version_file)})
-            return json.dumps({"status": "no_pin_found", "path": str(proj)})
+                return _json({"status": "unpinned", "removed": str(version_file)})
+            return _json({"status": "no_pin_found", "path": str(proj)})
 
         # Write pin
         version_file.write_text(version + "\n")
@@ -434,21 +446,21 @@ def run_install_mojo(version: str | None = None, project_path: str | None = None
                 capture_output=True, text=True, timeout=120,
             )
             mojo_ver = proc.stdout.strip() or proc.stderr.strip()
-            return json.dumps({
+            return _json({
                 "status": "pinned",
                 "version_file": str(version_file),
                 "pinned_version": version,
                 "mojo_version_output": mojo_ver,
             })
         except subprocess.TimeoutExpired:
-            return json.dumps({
+            return _json({
                 "status": "pinned",
                 "version_file": str(version_file),
                 "pinned_version": version,
                 "warning": "cache warm-up timed out; uv will download on first use",
             })
         except Exception as e:
-            return json.dumps({
+            return _json({
                 "status": "pinned",
                 "version_file": str(version_file),
                 "pinned_version": version,
@@ -470,22 +482,22 @@ def run_install_mojo(version: str | None = None, project_path: str | None = None
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if proc.returncode == 0:
-            return json.dumps({
+            return _json({
                 "status": action,
                 "path": shutil.which("mojo"),
                 "stdout": proc.stdout[:MAX_OUTPUT],
                 "stderr": proc.stderr[:MAX_OUTPUT],
             })
-        return json.dumps({
+        return _json({
             "error": f"{action} failed",
             "stdout": proc.stdout[:MAX_OUTPUT],
             "stderr": proc.stderr[:MAX_OUTPUT],
             "returncode": proc.returncode,
         })
     except subprocess.TimeoutExpired:
-        return json.dumps({"error": "operation timed out after 120 seconds"})
+        return _json({"error": "operation timed out after 120 seconds"})
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _json({"error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -507,17 +519,17 @@ def run_validate(
     from .gotchas import validate_code
 
     if code is None and path is None:
-        return json.dumps({"error": "Either 'code' or 'path' must be provided."})
+        return _json({"error": "Either 'code' or 'path' must be provided."})
 
     if code is None:
         try:
             assert path is not None  # guarded by check above
             p = Path(path).resolve()
             if not p.is_file():
-                return json.dumps({"error": f"Not a file: {path}"})
+                return _json({"error": f"Not a file: {path}"})
             code = p.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
-            return json.dumps({"error": str(e)})
+            return _json({"error": str(e)})
 
     if mojo_version is None:
         try:
@@ -531,4 +543,4 @@ def run_validate(
             mojo_version = "0.26.0"
 
     issues = validate_code(code, mojo_version)
-    return json.dumps({"issues": issues, "count": len(issues)}, indent=2)
+    return _json({"issues": issues, "count": len(issues)})
