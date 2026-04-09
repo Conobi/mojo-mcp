@@ -270,3 +270,48 @@ class TestReadFileHints:
         Path(f.name).unlink()
         assert "validate" in result["hint"]
         assert "KB" in result["hint"]
+
+
+from mojo_mcp.sandbox import run_mojo_version, run_install_mojo, run_update_server
+
+
+class TestMojoVersionHints:
+    @patch("mojo_mcp.sandbox.shutil.which", return_value=None)
+    def test_no_mojo_has_hint(self, mock_which):
+        result = json.loads(run_mojo_version())
+        assert "hint" in result
+        assert "install_mojo" in result["hint"]
+
+    @patch("mojo_mcp.sandbox.shutil.which", return_value=None)
+    def test_no_mojo_no_global_binary(self, mock_which):
+        result = json.loads(run_mojo_version())
+        assert "global_binary" not in result
+
+
+class TestInstallMojoIdempotent:
+    def test_already_pinned_same_version(self):
+        with tempfile.TemporaryDirectory() as d:
+            vf = Path(d) / ".mojo-version"
+            vf.write_text("25.6.0\n")
+            result = json.loads(run_install_mojo(version="25.6.0", project_path=d))
+            assert result["status"] == "already_pinned"
+            assert result["version"] == "25.6.0"
+
+    def test_install_success_has_hint(self):
+        with tempfile.TemporaryDirectory() as d:
+            with patch("mojo_mcp.sandbox.shutil.which", return_value="/usr/bin/uv"):
+                with patch("mojo_mcp.sandbox.subprocess.run") as mock_run:
+                    mock_run.return_value = MagicMock(stdout="mojo 25.6.0\n", stderr="", returncode=0)
+                    result = json.loads(run_install_mojo(version="25.6.0", project_path=d))
+            assert "hint" in result
+            assert "mojo_version" in result["hint"]
+
+
+class TestUpdateServerHint:
+    @patch("mojo_mcp.sandbox.shutil.which", return_value="/usr/bin/uv")
+    @patch("mojo_mcp.sandbox.subprocess.run")
+    def test_success_has_hint_not_next_step(self, mock_run, mock_which):
+        mock_run.return_value = MagicMock(stdout="abc123\n", stderr="", returncode=0)
+        result = json.loads(run_update_server())
+        assert "hint" in result
+        assert "next_step" not in result

@@ -416,7 +416,7 @@ def run_mojo_version(path: str | None = None) -> str:
       - pinned_version: version string from nearest .mojo-version file
       - version_file: path to that file
     """
-    result: dict = {}
+    result: dict[str, Any] = {}
 
     # Global version
     mojo_path = shutil.which("mojo")
@@ -426,12 +426,11 @@ def run_mojo_version(path: str | None = None) -> str:
                 ["mojo", "--version"], capture_output=True, text=True, timeout=5
             )
             result["global_version"] = proc.stdout.strip() or proc.stderr.strip()
-            result["global_binary"] = mojo_path
         except Exception as e:
             result["global_version_error"] = str(e)
     else:
         result["global_version"] = None
-        result["global_binary"] = None
+        result["hint"] = "Use install_mojo() to install Mojo."
 
     # Project-pinned version
     version_file, pinned_version = _find_mojo_version_file(path)
@@ -467,7 +466,7 @@ def run_update_server() -> str:
             return _json({
                 "status": "updated",
                 "version": proc.stdout.strip() or proc.stderr.strip(),
-                "next_step": "Restart Claude Code to load the new version.",
+                "hint": "Restart the host application to load the new version.",
             })
         return _json({
             "error": "update failed",
@@ -507,8 +506,20 @@ def run_install_mojo(version: str | None = None, project_path: str | None = None
             # Remove pin — revert to global
             if version_file.exists():
                 version_file.unlink()
-                return _json({"status": "unpinned", "removed": str(version_file)})
+                return _json({
+                    "status": "unpinned",
+                    "removed": str(version_file),
+                    "hint": "Use mojo_version() to check the active version.",
+                })
             return _json({"status": "no_pin_found", "path": str(proj)})
+
+        # Idempotent: already pinned to the same version
+        if version_file.exists() and version_file.read_text().strip() == version:
+            return _json({
+                "status": "already_pinned",
+                "version": version,
+                "version_file": str(version_file),
+            })
 
         # Write pin
         version_file.write_text(version + "\n")
@@ -525,6 +536,7 @@ def run_install_mojo(version: str | None = None, project_path: str | None = None
                 "version_file": str(version_file),
                 "pinned_version": version,
                 "mojo_version_output": mojo_ver,
+                "hint": "Use mojo_version() to verify, then execute(code=...) to test.",
             })
         except subprocess.TimeoutExpired:
             return _json({
@@ -532,6 +544,7 @@ def run_install_mojo(version: str | None = None, project_path: str | None = None
                 "version_file": str(version_file),
                 "pinned_version": version,
                 "warning": "cache warm-up timed out; uv will download on first use",
+                "hint": "Use mojo_version() to verify, then execute(code=...) to test.",
             })
         except Exception as e:
             return _json({
@@ -539,6 +552,7 @@ def run_install_mojo(version: str | None = None, project_path: str | None = None
                 "version_file": str(version_file),
                 "pinned_version": version,
                 "warning": str(e),
+                "hint": "Use mojo_version() to verify, then execute(code=...) to test.",
             })
 
     # Global install / upgrade
@@ -561,6 +575,7 @@ def run_install_mojo(version: str | None = None, project_path: str | None = None
                 "path": shutil.which("mojo"),
                 "stdout": proc.stdout[:MAX_OUTPUT],
                 "stderr": proc.stderr[:MAX_OUTPUT],
+                "hint": "Use mojo_version() to verify, then execute(code=...) to test.",
             })
         return _json({
             "error": f"{action} failed",
