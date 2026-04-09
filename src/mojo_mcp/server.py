@@ -193,7 +193,7 @@ LIST_FILES_TOOL = types.Tool(
             "path": {"type": "string", "description": "Directory to search."},
             "pattern": {"type": "string", "description": "Glob pattern (default: **/*.mojo)."},
         },
-        "required": ["path"],
+        "required": [],
     },
 )
 
