@@ -157,8 +157,6 @@ class TestSearchWrapped:
 
     def test_timeout_wrapped(self):
         docs = {}
-        # This will fail because 'import' is not in restricted builtins, causing an error (not a timeout)
-        # Use a while loop instead to trigger timeout
         result = json.loads(run_search("while True: pass", docs))
         assert "error" in result
 
