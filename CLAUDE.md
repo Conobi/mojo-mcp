@@ -20,6 +20,7 @@ src/mojo_mcp/
   gotchas.yaml     — known gotcha patterns database (version-filtered)
 tests/
   conftest.py      — pytest fixtures, --run-mojo marker
+  test_axi.py      — AXI ergonomic improvements (hints, compact JSON, empty states)
   test_gotchas.py  — gotcha loading and pattern matching tests
   test_validate.py — validate tool unit tests
   test_enrichment.py — execute error enrichment tests
@@ -51,6 +52,12 @@ All tools are defined as `types.Tool` constants in `server.py` and routed in `ca
 - **Docs dict shape:** `{module_name: {name, description, structs, functions, traits, aliases}}`
   - Each item: `{name, signature, description}`
 - **Note:** No imports available inside the snippet. Must use `return`.
+- **Returns:** Wrapped metadata object (compact JSON):
+  - Normal: `{result, hint}` — `result` is the Python return value, `hint` suggests `lookup`
+  - Null: `{result: null, message, hint}` — when agent code returns `None`
+  - Truncated (>8KB): `{result_raw, truncated: true, total_bytes, hint}` — `result_raw` is a truncated JSON string
+  - Error/timeout: `{error}`
+- **Breaking change (AXI):** Previously returned raw JSON; now always wrapped in metadata object
 
 ### 2. `execute`
 - **Input:** `code` — complete Mojo source file (must have `def main()`)
@@ -64,21 +71,35 @@ All tools are defined as `types.Tool` constants in `server.py` and routed in `ca
 - **mojox pipeline:** when `cwd` has a venv with `mojox`, it's used as the compiler frontend (auto-discovers installed Mojo packages). For version-pinned projects (bare `mojo` via uvx), `_find_mojo_packages()` manually injects `-I` for `mojo_packages/` and sets `LD_LIBRARY_PATH` for native libs.
 - **Error enrichment:** failed executions and timeouts are automatically enriched with matching gotcha hints via `gotchas.enrich_error()`
 - **Key fix:** subprocess `cwd` is set to the user's `cwd` (not `tmp_dir`) so that `-I .` resolves against the project root
-- **Returns:** `{stdout, stderr, returncode[, mojo_version, version_file, gotcha_hints]}` JSON
+- **Returns:** Compact JSON with AXI ergonomics:
+  - Always: `{stdout, returncode, duration_s}`
+  - On failure or non-empty stderr: `+ stderr`
+  - On failure: `+ hint, error_summary` (first `error:` line extracted from stderr)
+  - With pinned version: `+ mojo_version, version_file`
+  - With gotcha matches: `+ gotcha_hints`
+  - `stderr` is **omitted** on success when empty (saves tokens)
 - **Typical project test:** `execute(code=..., cwd="/path/to/project", include_paths=["."], defines={"ASSERT": "all"})`
 
 ### 3. `read_file`
 - **Input:** `path` — absolute or relative path
 - **Backend:** `sandbox.run_read_file(path)` — sync I/O in executor
 - **Blocked paths:** `/etc`, `/proc`, `/sys`, `/dev` (raises `Access denied` in result)
-- **Cap:** 100 KB; truncation notice appended if exceeded
-- **Returns:** `{path, content}` or `{error}` JSON
+- **Cap:** 100 KB
+- **Returns:** Compact JSON:
+  - Normal: `{path, content}` — for non-`.mojo` files
+  - `.mojo` file: `{path, content, hint}` — hint suggests `validate`
+  - Truncated: `{path, content, truncated: true, total_bytes, hint}` — combined hint with size info + validate suggestion for `.mojo` files
+  - Error: `{error}`
 
 ### 4. `list_files`
-- **Input:** `path` (dir), `pattern` (glob, default `**/*.mojo`)
+- **Input:** `path` (dir, optional — defaults to `"."`), `pattern` (glob, default `**/*.mojo`)
 - **Backend:** `sandbox.run_list_files(path, pattern)` — sync I/O in executor
-- **Cap:** 200 entries; `truncated: true` flag if exceeded
-- **Returns:** `{path, pattern, files, truncated}` JSON
+- **Cap:** 200 entries
+- **Returns:** Compact JSON:
+  - Always: `{path, pattern, files, count}`
+  - Truncated: `+ truncated: true, hint`
+  - Empty: `+ message, hint` (e.g. "0 files matching **/*.mojo in /path")
+  - Non-empty: `+ hint` (suggests `read_file` / `validate`)
 
 ### 5. `lookup`
 - **Input:** `query` — dot-notation symbol path, e.g. `collections.dict.Dict`
@@ -104,7 +125,10 @@ All tools are defined as `types.Tool` constants in `server.py` and routed in `ca
 - **Input:** `code` (Mojo source string), `path` (file path, ignored if code provided), `mojo_version` (optional, auto-detected)
 - **Backend:** `sandbox.run_validate(code, path, mojo_version)` → `gotchas.validate_code()`
 - **Pattern database:** `gotchas.yaml` — each entry has `id`, `severity`, `mojo_versions` (semver filter), `code_pattern` (regex), `error_pattern`, `timeout_pattern`, `description`, `fix`
-- **Returns:** `{issues: [{id, title, severity, description, fix, link?}], count}` JSON
+- **Returns:** Compact JSON:
+  - Clean: `{issues: [], count: 0, message, hint}` — confirms check ran, suggests `execute`
+  - Issues: `{issues: [{id, title, severity, description, fix, link?}], count, hint}` — suggests fixing then `execute`
+  - Error: `{error, hint}` — includes usage example
 - **Also used by:** `execute` tool — failed executions and timeouts are automatically enriched with matching gotcha hints via `gotchas.enrich_error()`
 
 ---
@@ -139,6 +163,16 @@ The signature is extracted by walking siblings after `<h1>`, looking for the fir
 
 ### Changelog structure
 Each Mojo version is a `<section>` element whose **direct** first child is an `<h2>`. Nested `<section>` children hold subsections (H3 + UL). The `_fetch_and_parse_changelog` function relies on this structure.
+
+### Output conventions (AXI-inspired)
+All tool responses use compact JSON (`_json()` helper — no indentation, `separators=(",",":")`) to minimize token cost. Key conventions:
+
+- **`"hint"` key:** Contextual next-step suggestion. Present on errors, empty states, and list outputs. Omitted on self-contained detail views (`lookup`, `changelog`). Always a single string, agent-agnostic (no "Claude Code" references).
+- **Empty states:** When the result is "nothing", include an explicit `"message"` (e.g. `"0 files matching..."`, `"No known gotcha patterns matched."`) plus a `"hint"`.
+- **Truncation:** Use `"truncated": true` + `"total_bytes": N` metadata fields instead of inline text in content. Combined hints cover both the truncation and next-step suggestion.
+- **Omit empty fields:** `stderr` omitted from `execute` on success when empty. `duration_s` always included.
+- **Error summaries:** `execute` failures include `"error_summary"` — the first `error:` line extracted from stderr (handles file-prefixed Mojo errors like `/path:3:5: error: ...`).
+- **Idempotent mutations:** `install_mojo` returns `"already_pinned"` instead of overwriting when the version matches.
 
 ---
 
