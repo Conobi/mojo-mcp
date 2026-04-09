@@ -1,6 +1,8 @@
 """Tests for AXI ergonomic improvements."""
 
 import json
+import tempfile
+from pathlib import Path
 
 from mojo_mcp.sandbox import _json
 
@@ -93,3 +95,37 @@ class TestExecutePhaseA:
         mock_run.return_value = MagicMock(stdout="ok\n", stderr="", returncode=0)
         result = json.loads(run_execute("def main(): pass\n"))
         assert "hint" not in result
+
+
+from mojo_mcp.sandbox import run_list_files
+
+
+class TestListFilesHints:
+    def test_has_count(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "a.mojo").write_text("x")
+            Path(d, "b.mojo").write_text("y")
+            result = json.loads(run_list_files(d))
+            assert result["count"] == 2
+            assert len(result["files"]) == 2
+
+    def test_empty_state_has_message(self):
+        with tempfile.TemporaryDirectory() as d:
+            result = json.loads(run_list_files(d))
+            assert result["count"] == 0
+            assert "message" in result
+            assert "0 files" in result["message"]
+            assert "hint" in result
+
+    def test_non_empty_has_hint(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "test.mojo").write_text("x")
+            result = json.loads(run_list_files(d))
+            assert "hint" in result
+            assert "read_file" in result["hint"]
+
+    def test_keeps_path_and_pattern(self):
+        with tempfile.TemporaryDirectory() as d:
+            result = json.loads(run_list_files(d))
+            assert "path" in result
+            assert "pattern" in result

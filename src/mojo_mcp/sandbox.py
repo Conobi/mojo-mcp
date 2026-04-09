@@ -182,8 +182,8 @@ def run_read_file(path: str) -> str:
 LIST_FILES_MAX_ENTRIES = 200
 
 
-def run_list_files(path: str, pattern: str = "**/*.mojo") -> str:
-    """List files matching glob; return JSON {path, pattern, files, truncated}."""
+def run_list_files(path: str = ".", pattern: str = "**/*.mojo") -> str:
+    """List files matching glob; return JSON with count, hints, and empty-state message."""
     import itertools
 
     try:
@@ -193,12 +193,22 @@ def run_list_files(path: str, pattern: str = "**/*.mojo") -> str:
         gen = base.glob(pattern)
         entries = sorted(str(f) for f in itertools.islice(gen, LIST_FILES_MAX_ENTRIES + 1))
         truncated = len(entries) > LIST_FILES_MAX_ENTRIES
-        return _json({
+        files = entries[:LIST_FILES_MAX_ENTRIES]
+        output: dict[str, Any] = {
             "path": str(base),
             "pattern": pattern,
-            "files": entries[:LIST_FILES_MAX_ENTRIES],
-            "truncated": truncated,
-        })
+            "files": files,
+            "count": len(files),
+        }
+        if truncated:
+            output["truncated"] = True
+            output["hint"] = "Showing first 200 files. Narrow the pattern to see specific files."
+        elif not files:
+            output["message"] = f"0 files matching {pattern} in {base}"
+            output["hint"] = "Try a different pattern or directory."
+        else:
+            output["hint"] = "Use read_file('<path>') to inspect a file, or validate(path='<path>') to check it."
+        return _json(output)
     except Exception as e:
         return _json({"error": str(e)})
 
