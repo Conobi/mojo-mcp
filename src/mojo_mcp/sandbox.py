@@ -376,7 +376,10 @@ def run_execute(
         parts = version_for_enrich.split(".")
         version_for_enrich = ".".join(parts[:3])
         hints = enrich_error(code, timed_out=True, mojo_version=version_for_enrich)
-        output = {"error": f"execution timed out after {timeout} seconds"}
+        output = {
+            "error": f"execution timed out after {timeout} seconds",
+            "hint": "Use validate(code=...) to check for known gotcha patterns.",
+        }
         if hints:
             output["gotcha_hints"] = hints
     except FileNotFoundError:
@@ -511,7 +514,11 @@ def run_install_mojo(version: str | None = None, project_path: str | None = None
                     "removed": str(version_file),
                     "hint": "Use mojo_version() to check the active version.",
                 })
-            return _json({"status": "no_pin_found", "path": str(proj)})
+            return _json({
+                "status": "no_pin_found",
+                "path": str(proj),
+                "hint": "Use install_mojo(version=..., project_path=...) to pin a version.",
+            })
 
         # Idempotent: already pinned to the same version
         if version_file.exists() and version_file.read_text().strip() == version:
@@ -519,6 +526,7 @@ def run_install_mojo(version: str | None = None, project_path: str | None = None
                 "status": "already_pinned",
                 "version": version,
                 "version_file": str(version_file),
+                "hint": "Use execute(code=...) to test with this version.",
             })
 
         # Write pin
@@ -618,10 +626,16 @@ def run_validate(
             assert path is not None  # guarded by check above
             p = Path(path).resolve()
             if not p.is_file():
-                return _json({"error": f"Not a file: {path}"})
+                return _json({
+                    "error": f"Not a file: {path}",
+                    "hint": "validate(code='fn main(): ...') or validate(path='/path/to/file.mojo')",
+                })
             code = p.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
-            return _json({"error": str(e)})
+            return _json({
+                "error": str(e),
+                "hint": "validate(code='fn main(): ...') or validate(path='/path/to/file.mojo')",
+            })
 
     if mojo_version is None:
         try:
