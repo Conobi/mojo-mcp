@@ -271,6 +271,7 @@ def run_execute(
                 run_env["LD_LIBRARY_PATH"] = f"{lib_dir}:{existing}" if existing else str(lib_dir)
 
         cmd = [*mojo_prefix, "run", *extra_flags, tmp_file]
+        t0 = time.monotonic()
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -279,16 +280,21 @@ def run_execute(
             cwd=run_cwd or tmp_dir,
             env=run_env,
         )
+        duration = round(time.monotonic() - t0, 1)
         output = {
             "stdout": result.stdout[:MAX_OUTPUT],
-            "stderr": result.stderr[:MAX_OUTPUT],
             "returncode": result.returncode,
+            "duration_s": duration,
         }
+        # Only include stderr when non-empty or on failure
+        if result.stderr or result.returncode != 0:
+            output["stderr"] = result.stderr[:MAX_OUTPUT]
         if pinned_version:
             output["mojo_version"] = pinned_version
             output["version_file"] = str(version_file)
         # Enrich failed executions with gotcha hints
         if result.returncode != 0:
+            output["hint"] = "Use validate(code=...) to check for known gotcha patterns."
             from .gotchas import enrich_error
             version_for_enrich = pinned_version or "0.26.0"
             parts = version_for_enrich.split(".")
