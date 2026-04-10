@@ -210,6 +210,20 @@ To force a refresh, delete the relevant file.
 
 ---
 
+## LSP Plugin Status
+
+The `mojo-lsp` plugin (in `plugins/mojo-lsp/`) ships a Claude Code plugin that configures `mojo-lsp-server` for `.mojo` files. **It is currently disabled** in user settings due to persistent false-positive diagnostics in `mojo-lsp-server`:
+
+1. **Circular import breaks method resolution** — reports `no matching function` on every save for code that compiles fine
+2. **Stale symbol table after file writes** — reports missing attributes after new methods are added
+3. **`main` in package member** — permanent false positives on all test files defining `main()`
+
+These false positives cause agents to waste tokens triaging phantom errors and to "fix" working code. Until `mojo-lsp-server` improves, agents should use `execute` as the ground truth for code validity and the MCP tools (`search`, `lookup`) for navigation.
+
+The plugin remains in the repo for when `mojo-lsp-server` diagnostics improve. A compiler-backed proxy design is shelved in `specs/2026-04-09-mojo-check-proxy.md`.
+
+---
+
 ## Known Limitations / Future Work
 
 - `search` returns shallow index data (name + short description). Use `lookup` for full signatures.
