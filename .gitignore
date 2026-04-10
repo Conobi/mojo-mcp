@@ -6,6 +6,7 @@ dist/
 *.egg-info/
 .pytest_cache/
 
-# Agent plans and skill artifacts
-docs/plans/
-docs/superpowers/
+# Agent plans, specs, and skill artifacts
+docs/
+plans/
+specs/
