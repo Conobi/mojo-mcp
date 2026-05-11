@@ -378,6 +378,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         else:
             source = code
 
+        assert source is not None  # narrowed by both-XOR / neither-XOR early returns above
         raw = await loop.run_in_executor(
             None, run_execute,
             source,
