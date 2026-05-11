@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .docs import get_cached_mojo_version
+
 MAX_OUTPUT = 8192  # 8KB cap to avoid flooding context
 
 
@@ -172,27 +174,30 @@ def run_search(code: str, docs: dict) -> str:
         executor.shutdown(wait=False)
 
     if result_data is None:
-        return _json({
+        out = {
             "result": None,
             "message": "Search returned no results.",
             "hint": "Try broader terms, or use lookup('module.Symbol') if you know the name.",
-        })
-
-    raw = json.dumps(result_data, separators=(",", ":"), default=str)
-    truncated = len(raw) > MAX_OUTPUT
-
-    if truncated:
-        return _json({
-            "result_raw": raw[:MAX_OUTPUT],
-            "truncated": True,
-            "total_bytes": len(raw),
-            "hint": "Result was truncated. Narrow your query to reduce output.",
-        })
-
-    return _json({
-        "result": result_data,
-        "hint": "Use lookup('<package>.<module>.<Symbol>') for full docs on any symbol.",
-    })
+        }
+    else:
+        raw = json.dumps(result_data, separators=(",", ":"), default=str)
+        truncated = len(raw) > MAX_OUTPUT
+        if truncated:
+            out = {
+                "result_raw": raw[:MAX_OUTPUT],
+                "truncated": True,
+                "total_bytes": len(raw),
+                "hint": "Result was truncated. Narrow your query to reduce output.",
+            }
+        else:
+            out = {
+                "result": result_data,
+                "hint": "Use lookup('<package>.<module>.<Symbol>') for full docs on any symbol.",
+            }
+    mv = get_cached_mojo_version()
+    if mv:
+        out["mojo_version"] = mv
+    return _json(out)
 
 
 # ---------------------------------------------------------------------------

@@ -170,6 +170,20 @@ class TestSearchWrapped:
         assert result["total_bytes"] > 8192
         assert "hint" in result
 
+    def test_includes_mojo_version_when_cached(self, monkeypatch):
+        from mojo_mcp import sandbox
+        monkeypatch.setattr(sandbox, "get_cached_mojo_version", lambda: "0.25.5.0")
+        docs = {"foo": {"name": "foo", "structs": [], "functions": [], "traits": [], "aliases": []}}
+        result = json.loads(sandbox.run_search("return list(docs.keys())", docs))
+        assert result["mojo_version"] == "0.25.5.0"
+
+    def test_omits_mojo_version_when_unknown(self, monkeypatch):
+        from mojo_mcp import sandbox
+        monkeypatch.setattr(sandbox, "get_cached_mojo_version", lambda: None)
+        docs = {"foo": {"name": "foo", "structs": [], "functions": [], "traits": [], "aliases": []}}
+        result = json.loads(sandbox.run_search("return list(docs.keys())", docs))
+        assert "mojo_version" not in result
+
 
 from mojo_mcp.sandbox import _extract_error_summary
 
@@ -320,9 +334,17 @@ import pytest
 
 class TestCallToolErrorHint:
     @pytest.mark.asyncio
-    async def test_unknown_tool_has_hint(self):
+    async def test_unknown_tool_md_default(self):
         from mojo_mcp.server import call_tool
         result = await call_tool("nonexistent_tool", {})
+        text = result[0].text
+        assert "nonexistent_tool" in text
+        assert "search" in text  # available tools listed
+
+    @pytest.mark.asyncio
+    async def test_unknown_tool_json_opt_in(self):
+        from mojo_mcp.server import call_tool
+        result = await call_tool("nonexistent_tool", {"format": "json"})
         parsed = json.loads(result[0].text)
         assert "error" in parsed
         assert "hint" in parsed

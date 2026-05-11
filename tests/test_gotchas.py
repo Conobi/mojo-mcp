@@ -12,9 +12,9 @@ class TestLoadGotchas:
         gotchas = load_gotchas()
         assert isinstance(gotchas, list)
 
-    def test_load_has_22_entries(self):
+    def test_load_has_32_entries(self):
         gotchas = load_gotchas()
-        assert len(gotchas) == 22
+        assert len(gotchas) == 32
 
     def test_all_entries_have_required_fields(self):
         gotchas = load_gotchas()
@@ -143,3 +143,75 @@ class TestEnrichError:
         assert "severity" in hint
         assert "description" in hint
         assert "fix" in hint
+
+    # -- 2026-05-11 audit additions --
+
+    def test_enriches_implicitly_copyable_required(self):
+        stderr = "error: value of type 'Error' cannot be implicitly copied, it does not conform to 'ImplicitlyCopyable'\n"
+        hints = enrich_error(stderr, timed_out=False, mojo_version="0.26.2")
+        ids = [h["id"] for h in hints]
+        assert "implicitly-copyable-required" in ids
+
+    def test_enriches_raise_in_non_raising_context(self):
+        stderr = "error: cannot call function that may raise in a context that cannot raise\n"
+        hints = enrich_error(stderr, timed_out=False, mojo_version="0.26.2")
+        ids = [h["id"] for h in hints]
+        assert "raise-in-non-raising-context" in ids
+
+    def test_enriches_expression_no_origin(self):
+        stderr = "error: expression does not designate a value with an origin\n"
+        hints = enrich_error(stderr, timed_out=False, mojo_version="0.26.2")
+        ids = [h["id"] for h in hints]
+        assert "expression-no-origin" in ids
+
+    def test_enriches_unqualified_struct_parameter(self):
+        stderr = "error: unqualified access to struct parameter 'min'; use 'Self.min' instead\n"
+        hints = enrich_error(stderr, timed_out=False, mojo_version="0.26.2")
+        ids = [h["id"] for h in hints]
+        assert "unqualified-struct-parameter" in ids
+
+    def test_enriches_main_in_package(self):
+        stderr = "error: defining 'main' within a package is not yet supported\n"
+        hints = enrich_error(stderr, timed_out=False, mojo_version="0.26.2")
+        ids = [h["id"] for h in hints]
+        assert "main-in-package" in ids
+
+    def test_enriches_failed_to_resolve_parent_package(self):
+        stderr = "error: failed to resolve parent package body\n"
+        hints = enrich_error(stderr, timed_out=False, mojo_version="0.26.2")
+        ids = [h["id"] for h in hints]
+        assert "failed-to-resolve-parent-package" in ids
+
+    def test_enriches_global_vars_not_supported(self):
+        stderr = "error: global vars are not supported\n"
+        hints = enrich_error(stderr, timed_out=False, mojo_version="0.26.2")
+        ids = [h["id"] for h in hints]
+        assert "global-vars-not-supported" in ids
+
+    def test_enriches_unknown_declaration_str(self):
+        stderr = "error: use of unknown declaration 'str'\n"
+        hints = enrich_error(stderr, timed_out=False, mojo_version="0.26.2")
+        ids = [h["id"] for h in hints]
+        assert "unknown-declaration-str" in ids
+
+    def test_enriches_copyable_movable_required(self):
+        stderr = "error: value of type 'QuantLinear' cannot be copied or moved; consider conforming it to 'Movable'\n"
+        hints = enrich_error(stderr, timed_out=False, mojo_version="0.26.2")
+        ids = [h["id"] for h in hints]
+        assert "copyable-movable-required" in ids
+
+    def test_enriches_raw_pointer_needs_unsafe(self):
+        stderr = "error: this public function might dereference a raw pointer but is not marked `unsafe`\n"
+        hints = enrich_error(stderr, timed_out=False, mojo_version="0.26.2")
+        ids = [h["id"] for h in hints]
+        assert "raw-pointer-needs-unsafe" in ids
+
+
+class TestValidateCodeAuditAdditions:
+    """Code-pattern (code-only) tests for 2026-05-11 audit additions."""
+
+    def test_detects_unknown_declaration_str_code(self):
+        code = "def main():\n    var x = str(42)\n    print(x)\n"
+        issues = validate_code(code, "0.26.2")
+        ids = [i["id"] for i in issues]
+        assert "unknown-declaration-str" in ids

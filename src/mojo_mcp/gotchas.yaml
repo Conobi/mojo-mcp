@@ -242,3 +242,115 @@ gotchas:
     description: "Mojo's compilation time scales super-linearly with the number of distinct struct types instantiated in one file. A file importing and using 8+ different struct types (each with methods like predict/update/reset) can cause the compiler to take 5+ minutes or appear to hang. This is due to LLVM code generation overhead from monomorphization of many generic types."
     fix: "Split large test/source files that use many different struct types into smaller files, each using 2-4 types. For test suites, create separate test files per module (test_ngram.mojo, test_match.mojo) instead of one monolithic file. Keep each .mojo file focused on a single module or 2-3 closely related types."
     link: null
+
+  # -- 2026-05-11 audit additions (mined from session transcripts) --
+
+  - id: implicitly-copyable-required
+    title: "Type does not conform to ImplicitlyCopyable"
+    severity: warning
+    mojo_versions: [">=0.26.0"]
+    code_pattern: null
+    error_pattern: "value of type '[^']+' cannot be implicitly copied, it does not conform to 'ImplicitlyCopyable'"
+    timeout_pattern: false
+    description: "Mojo requires explicit ImplicitlyCopyable conformance for values that are copied implicitly (e.g. assignment, parameter passing without `^`). Many wrapper types (Error, Optional[Foo], custom structs) are Copyable but not ImplicitlyCopyable, so the compiler refuses to copy them silently."
+    fix: "Add `ImplicitlyCopyable` to the struct's trait list (e.g. `struct Foo(Copyable, ImplicitlyCopyable, Movable):`), pass the value with `^` to transfer ownership, or wrap the access so the value is bound by reference instead of copied."
+    link: null
+
+  - id: raise-in-non-raising-context
+    title: "Calling a raising function from a non-raising context"
+    severity: warning
+    mojo_versions: [">=0.26.0"]
+    code_pattern: null
+    error_pattern: "cannot call function that may raise in a context that cannot raise"
+    timeout_pattern: false
+    description: "A function declared without `raises` cannot call any function that may raise. In Mojo 0.26+, `def` is non-raising by default (same semantics as the old `fn`); only `def foo() raises:` or `fn foo() raises:` can propagate exceptions."
+    fix: "Add `raises` to the calling function's signature (e.g. `def main() raises:`), wrap the raising call in `try:`/`except:`, or replace it with a non-raising alternative."
+    link: null
+
+  - id: expression-no-origin
+    title: "Expression does not designate a value with an origin"
+    severity: warning
+    mojo_versions: [">=0.26.0"]
+    code_pattern: null
+    error_pattern: "expression does not designate a value with an origin"
+    timeout_pattern: false
+    description: "Returned values, temporaries, and computed expressions do not have a stable origin and cannot be borrowed by reference. This typically appears when indexing into a function return value (e.g. `make_pair()[0]`) or aliasing a temporary."
+    fix: "Bind the expression to a named `var` first so it has a definite origin: `var pair = make_pair(); var first = pair[0]`. For tuple returns destructure into vars: `var (a, b) = make_pair()`."
+    link: null
+
+  - id: unqualified-struct-parameter
+    title: "Unqualified access to struct parameter"
+    severity: warning
+    mojo_versions: [">=0.26.0"]
+    code_pattern: null
+    error_pattern: "unqualified access to struct parameter '[^']+'; use 'Self\\.[^']+' instead"
+    timeout_pattern: false
+    description: "Inside a struct method, type parameters of the enclosing struct must be referenced as `Self.parameter`, not bare. Mojo enforces this to disambiguate parameter access from local variable lookup."
+    fix: "Prefix the parameter name with `Self.`: replace `min` with `Self.min`, `max` with `Self.max`, etc."
+    link: null
+
+  - id: main-in-package
+    title: "`main` cannot be defined inside a package"
+    severity: warning
+    mojo_versions: [">=0.26.0"]
+    code_pattern: null
+    error_pattern: "defining 'main' within a package is not yet supported"
+    timeout_pattern: false
+    description: "Mojo refuses to compile any file containing `def main()` if that file lives inside a package directory (a directory containing `__init__.mojo`). This blocks the common pattern of writing test entry points alongside library modules."
+    fix: "Move the file with `def main()` out of the package directory, or convert it into a top-level script. If you need to run tests for a package, place runner scripts in a separate non-package directory and import the test modules from there."
+    link: null
+
+  - id: failed-to-resolve-parent-package
+    title: "Failed to resolve parent package body"
+    severity: warning
+    mojo_versions: [">=0.26.0"]
+    code_pattern: null
+    error_pattern: "failed to resolve parent package body"
+    timeout_pattern: false
+    description: "The Mojo compiler couldn't locate the parent package on the import path. This usually means the project root isn't on `-I` or the package directory is missing an `__init__.mojo`."
+    fix: "Run with `mojo run -I . path/to/file.mojo` from the project root so Mojo can discover the package layout. Confirm every package directory contains an `__init__.mojo` (empty is fine)."
+    link: null
+
+  - id: global-vars-not-supported
+    title: "Global vars are not supported"
+    severity: warning
+    mojo_versions: [">=0.26.0"]
+    code_pattern: null
+    error_pattern: "global vars are not supported"
+    timeout_pattern: false
+    description: "Mojo does not allow mutable globals. This error is the runtime-side complement of `module-level variable must be declared as alias` and fires for module-scope `var` declarations not caught by the earlier syntax check."
+    fix: "Replace `var` at module scope with `alias` (for compile-time constants), wrap the state in a struct, or move the variable into `def main()`."
+    link: null
+
+  - id: unknown-declaration-str
+    title: "`str()` builtin removed — use `String()`"
+    severity: warning
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "\\bstr\\s*\\("
+    error_pattern: "use of unknown declaration 'str'"
+    timeout_pattern: false
+    description: "Mojo never had a Python-style `str()` builtin. Calls like `str(x)` are a common port-from-Python mistake; the compiler reports them as unknown declarations."
+    fix: "Replace `str(x)` with `String(x)`. For numbers, `String(i)` works directly. For custom types, ensure the type conforms to `Writable` and call `String(x)`."
+    link: null
+
+  - id: copyable-movable-required
+    title: "Type cannot be copied or moved — add Copyable/Movable"
+    severity: warning
+    mojo_versions: [">=0.26.0"]
+    code_pattern: null
+    error_pattern: "value of type '[^']+' cannot be copied or moved; consider conforming it to '(?:Copyable|Movable|ImplicitlyCopyable)'"
+    timeout_pattern: false
+    description: "Containers (List, Dict, Optional) and many stdlib APIs require their element types to be Copyable and Movable. Custom structs without explicit conformance can be stack-allocated locally but cannot be stored in collections or returned by value."
+    fix: "Add the required traits to the struct definition: `struct Foo(Copyable, Movable):`. If the type owns non-copyable resources (file handles, unique pointers), implement `__copyinit__`/`__moveinit__` manually or wrap it in an `OwningPointer`."
+    link: null
+
+  - id: raw-pointer-needs-unsafe
+    title: "Public function dereferencing raw pointer must be `unsafe`"
+    severity: warning
+    mojo_versions: [">=0.26.0"]
+    code_pattern: null
+    error_pattern: "this public function might dereference a raw pointer but is not marked `unsafe`"
+    timeout_pattern: false
+    description: "Public functions that may dereference an UnsafePointer must opt in to unsafe semantics. Mojo refuses to expose pointer-dereferencing APIs as safe-by-default."
+    fix: "Mark the function `unsafe` (e.g. `unsafe def read_at(ptr: UnsafePointer[UInt8], i: Int) -> UInt8:`), make it `private` / module-local, or wrap the pointer access behind a safe abstraction that validates bounds before dereferencing."
+    link: null
