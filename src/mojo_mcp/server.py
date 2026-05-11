@@ -85,7 +85,10 @@ EXECUTE_TOOL = types.Tool(
         "Pass `defines` for `-D` compile-time defines (e.g. `{\"ASSERT\": \"all\"}`). "
         "Typical project test invocation: cwd=<project_root>, include_paths=[\".\"], "
         "defines={\"ASSERT\": \"all\"}. "
-        "If mojo is not installed, call `install_mojo` first."
+        "If mojo is not installed, call `install_mojo` first. "
+        "Provide exactly one of `code` (inline source) or `path` (file to read). "
+        "For code longer than ~20 lines, prefer `path` to avoid Claude Code's "
+        "multiline parameter rendering issue (anthropics/claude-code#13359)."
     ),
     inputSchema={
         "type": "object",
@@ -93,6 +96,15 @@ EXECUTE_TOOL = types.Tool(
             "code": {
                 "type": "string",
                 "description": "Complete Mojo source file contents.",
+            },
+            "path": {
+                "type": "string",
+                "description": (
+                    "Path to a .mojo source file. Resolved against `cwd` if relative, "
+                    "or absolute. Use this for code longer than ~20 lines to avoid "
+                    "Claude Code's multiline parameter rendering issue "
+                    "(upstream: anthropics/claude-code#13359)."
+                ),
             },
             "cwd": {
                 "type": "string",
@@ -124,7 +136,7 @@ EXECUTE_TOOL = types.Tool(
             },
             "format": _FORMAT_PROP,
         },
-        "required": ["code"],
+        "required": [],
     },
 )
 
@@ -332,10 +344,44 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         result_dict = _to_dict(raw)
 
     elif name == "execute":
+        code = arguments.get("code")
+        path = arguments.get("path")
+        cwd = arguments.get("cwd")
+        if code and path:
+            result_dict = {
+                "error": "Provide either 'code' or 'path', not both.",
+                "hint": "Use 'code' for inline snippets; 'path' for files on disk.",
+            }
+            return [types.TextContent(type="text", text=render(result_dict, fmt, tool=name))]
+        if not code and not path:
+            result_dict = {
+                "error": "Provide 'code' (inline source) or 'path' (file to read).",
+                "hint": "execute(code='def main(): print(42)') or execute(path='./main.mojo').",
+            }
+            return [types.TextContent(type="text", text=render(result_dict, fmt, tool=name))]
+        if path:
+            from pathlib import Path as _P
+            p = _P(path)
+            if not p.is_absolute() and cwd:
+                p = _P(cwd) / p
+            try:
+                source = p.read_text()
+            except FileNotFoundError:
+                result_dict = {
+                    "error": f"File not found: {p}",
+                    "hint": "Check the path or use list_files to discover files.",
+                }
+                return [types.TextContent(type="text", text=render(result_dict, fmt, tool=name))]
+            except OSError as e:
+                result_dict = {"error": f"Could not read {p}: {e}"}
+                return [types.TextContent(type="text", text=render(result_dict, fmt, tool=name))]
+        else:
+            source = code
+
         raw = await loop.run_in_executor(
             None, run_execute,
-            arguments.get("code", ""),
-            arguments.get("cwd"),
+            source,
+            cwd,
             arguments.get("include_paths"),
             arguments.get("defines"),
             arguments.get("timeout", 30),
