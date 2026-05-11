@@ -170,6 +170,20 @@ class TestSearchWrapped:
         assert result["total_bytes"] > 8192
         assert "hint" in result
 
+    def test_includes_mojo_version_when_cached(self, monkeypatch):
+        from mojo_mcp import sandbox
+        monkeypatch.setattr(sandbox, "get_cached_mojo_version", lambda: "0.25.5.0")
+        docs = {"foo": {"name": "foo", "structs": [], "functions": [], "traits": [], "aliases": []}}
+        result = json.loads(sandbox.run_search("return list(docs.keys())", docs))
+        assert result["mojo_version"] == "0.25.5.0"
+
+    def test_omits_mojo_version_when_unknown(self, monkeypatch):
+        from mojo_mcp import sandbox
+        monkeypatch.setattr(sandbox, "get_cached_mojo_version", lambda: None)
+        docs = {"foo": {"name": "foo", "structs": [], "functions": [], "traits": [], "aliases": []}}
+        result = json.loads(sandbox.run_search("return list(docs.keys())", docs))
+        assert "mojo_version" not in result
+
 
 from mojo_mcp.sandbox import _extract_error_summary
 

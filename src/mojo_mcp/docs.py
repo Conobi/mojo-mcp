@@ -3,6 +3,8 @@
 import json
 import logging
 import re
+import shutil
+import subprocess
 import time
 from pathlib import Path
 
@@ -14,6 +16,7 @@ logger = logging.getLogger(__name__)
 STDLIB_INDEX_URL = "https://docs.modular.com/mojo/std/"
 CACHE_PATH = Path.home() / ".cache" / "mojo-mcp" / "docs.json"
 CACHE_TTL = 1209600  # 14 days
+CACHE_SCHEMA_VERSION = 2
 
 # Unicode zero-width space that Docusaurus appends to headings
 _ZWS = "\u200b"
@@ -21,6 +24,51 @@ _ZWS = "\u200b"
 
 def _text(el: Tag | None) -> str:
     return el.get_text(separator=" ", strip=True).replace(_ZWS, "").strip() if el else ""
+
+
+def _parse_docs_source_version(html: str) -> str:
+    """Best-effort extraction of the docs site version from a page's HTML.
+
+    Returns 'unknown' if no version marker can be located.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    meta = soup.find("meta", attrs={"name": "docs-version"})
+    if meta and meta.get("content"):
+        return str(meta["content"]).strip()
+    match = re.search(r"\bv\d+(?:\.\d+)+\b", html)
+    if match:
+        return match.group(0)
+    return "unknown"
+
+
+def _capture_mojo_version() -> str | None:
+    """Best-effort `mojo --version` capture. Returns None on any failure."""
+    binary = shutil.which("mojo")
+    if not binary:
+        return None
+    try:
+        result = subprocess.run(
+            [binary, "--version"], capture_output=True, text=True, timeout=5
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    line = (result.stdout or "").splitlines()
+    return line[0].strip() if line else None
+
+
+def get_cached_mojo_version() -> str | None:
+    """Return the mojo_version_at_fetch stored in the docs cache envelope, or None."""
+    if not CACHE_PATH.exists():
+        return None
+    try:
+        envelope = json.loads(CACHE_PATH.read_text())
+    except Exception:
+        return None
+    if not isinstance(envelope, dict) or envelope.get("schema_version") != CACHE_SCHEMA_VERSION:
+        return None
+    return envelope.get("mojo_version_at_fetch")
 
 
 def _parse_module_page(html: str, url: str) -> dict:
@@ -212,32 +260,92 @@ async def build_docs_index() -> dict:
 
 
 def load_cached_docs() -> dict | None:
-    """Return cached docs if they exist and are fresh."""
+    """Return cached module dict if envelope is valid and TTL is fresh."""
     if not CACHE_PATH.exists():
         return None
-    age = time.time() - CACHE_PATH.stat().st_mtime
-    if age > CACHE_TTL:
-        return None
     try:
-        return json.loads(CACHE_PATH.read_text())
+        envelope = json.loads(CACHE_PATH.read_text())
     except Exception:
         return None
+    if not isinstance(envelope, dict):
+        return None
+    schema_version = envelope.get("schema_version")
+    if schema_version != CACHE_SCHEMA_VERSION:
+        logger.info(
+            "rebuilding docs cache: schema_version=%r -> %d",
+            schema_version, CACHE_SCHEMA_VERSION,
+        )
+        return None
+    fetched_at = envelope.get("fetched_at", 0)
+    if time.time() - fetched_at > CACHE_TTL:
+        return None
+    modules = envelope.get("modules")
+    return modules if isinstance(modules, dict) else None
 
 
-def save_docs_cache(docs: dict) -> None:
+def save_docs_cache(
+    modules: dict,
+    *,
+    docs_source_version: str = "unknown",
+    mojo_version_at_fetch: str | None = None,
+) -> None:
+    """Write the v2 envelope wrapping `modules`."""
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CACHE_PATH.write_text(json.dumps(docs, indent=2))
+    envelope = {
+        "schema_version": CACHE_SCHEMA_VERSION,
+        "fetched_at": time.time(),
+        "docs_source_version": docs_source_version,
+        "mojo_version_at_fetch": mojo_version_at_fetch,
+        "modules": modules,
+    }
+    CACHE_PATH.write_text(json.dumps(envelope, indent=2))
+
+
+async def _probe_docs_source_version() -> str:
+    """Fetch only the index page to detect docs version. Best-effort, 5s timeout."""
+    try:
+        async with httpx.AsyncClient(
+            timeout=5,
+            follow_redirects=True,
+            headers={"User-Agent": "mojo-mcp/0.1 version-probe"},
+        ) as client:
+            resp = await client.get(STDLIB_INDEX_URL)
+            resp.raise_for_status()
+            return _parse_docs_source_version(resp.text)
+    except Exception:
+        return "unknown"
 
 
 async def get_docs() -> dict:
-    """Return docs from cache if fresh, otherwise scrape and cache."""
+    """Return docs from cache if fresh, otherwise refresh-in-place or rebuild."""
     cached = load_cached_docs()
     if cached:
         logger.info("Loaded Mojo stdlib docs from cache (%d modules)", len(cached))
         return cached
 
+    # TTL miss with valid v2 envelope: maybe just refresh fetched_at if source hasn't changed.
+    if CACHE_PATH.exists():
+        try:
+            envelope = json.loads(CACHE_PATH.read_text())
+            if envelope.get("schema_version") == CACHE_SCHEMA_VERSION:
+                cached_source = envelope.get("docs_source_version", "unknown")
+                live_source = await _probe_docs_source_version()
+                if live_source != "unknown" and live_source == cached_source:
+                    envelope["fetched_at"] = time.time()
+                    CACHE_PATH.write_text(json.dumps(envelope, indent=2))
+                    modules = envelope.get("modules", {})
+                    logger.info(
+                        "Refreshed docs cache (source version %s unchanged)", live_source
+                    )
+                    return modules
+        except Exception:
+            pass
+
+    # Full rebuild
+    mojo_version = _capture_mojo_version()
     docs = await build_docs_index()
-    save_docs_cache(docs)
+    source_version = await _probe_docs_source_version()
+    save_docs_cache(docs, docs_source_version=source_version, mojo_version_at_fetch=mojo_version)
     logger.info("Indexed and cached %d Mojo stdlib modules", len(docs))
     return docs
 
