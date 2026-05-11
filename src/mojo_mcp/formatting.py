@@ -96,6 +96,85 @@ def _render_search(r: dict) -> str:
     return "\n".join(parts)
 
 
+_SEVERITY_GLYPH = {"critical": "⛔", "warning": "⚠️", "info": "ℹ️"}
+
+
+@_register("validate")
+def _render_validate(r: dict) -> str:
+    if "error" in r:
+        return f"**Error:** {r['error']}" + (f"\n\n_{r['hint']}_" if r.get("hint") else "")
+    parts: list[str] = []
+    issues = r.get("issues", [])
+    if not issues:
+        msg = r.get("message", "No known gotcha patterns matched.")
+        parts.append(f"✓ {msg}")
+    else:
+        parts.append(f"**Found {len(issues)} issue{'s' if len(issues) != 1 else ''}:**")
+        for issue in issues:
+            sev = issue.get("severity", "info")
+            glyph = _SEVERITY_GLYPH.get(sev, "•")
+            title = issue.get("title", issue.get("id", "?"))
+            iid = issue.get("id", "?")
+            desc = issue.get("description", "")
+            fix = issue.get("fix", "")
+            parts.append(f"- {glyph} **[{sev}] {iid}** — {title}")
+            if desc:
+                parts.append(f"  {desc}")
+            if fix:
+                parts.append(f"  _Fix:_ {fix}")
+    if r.get("hint"):
+        parts.append(f"\n_{r['hint']}_")
+    return "\n".join(parts)
+
+
+_LANG_MAP = {".mojo": "mojo", ".py": "python", ".yaml": "yaml", ".yml": "yaml", ".toml": "toml", ".md": "markdown", ".json": "json"}
+
+
+def _lang_for(path: str) -> str:
+    for ext, lang in _LANG_MAP.items():
+        if path.endswith(ext):
+            return lang
+    return "text"
+
+
+@_register("read_file")
+def _render_read_file(r: dict) -> str:
+    if "error" in r:
+        return f"**Error:** {r['error']}"
+    path = r.get("path", "")
+    content = r.get("content", "")
+    fence = _fence(content)
+    lang = _lang_for(path)
+    parts = [f"### {path}", f"{fence}{lang}", content, fence]
+    if r.get("truncated"):
+        parts.append(f"\n_truncated at 100KB; total_bytes={r.get('total_bytes')}_")
+    if r.get("hint"):
+        parts.append(f"\n_{r['hint']}_")
+    return "\n".join(parts)
+
+
+@_register("list_files")
+def _render_list_files(r: dict) -> str:
+    if "error" in r:
+        return f"**Error:** {r['error']}"
+    path = r.get("path", "")
+    pattern = r.get("pattern", "")
+    files = r.get("files", [])
+    count = r.get("count", len(files))
+    parts = [f"### {path}", f"_pattern:_ `{pattern}`"]
+    if not files:
+        parts.append(r.get("message", "(no matches)"))
+    else:
+        for f in files:
+            parts.append(f"- {f}")
+        parts.append(f"\n**Count:** {count}")
+    if r.get("truncated"):
+        parts.append("_(result truncated)_")
+    if r.get("hint"):
+        parts.append(f"\n_{r['hint']}_")
+    return "\n".join(parts)
+
+
 @_register("execute")
 def _render_execute(r: dict) -> str:
     if "error" in r:

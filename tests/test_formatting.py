@@ -120,3 +120,74 @@ class TestExecuteRenderer:
         md = render(result, "md", tool="execute")
         assert "mojo not installed" in md
         assert "install_mojo" in md
+
+
+class TestValidateRenderer:
+    def test_clean_shows_checkmark(self):
+        result = {"issues": [], "count": 0, "message": "No known gotcha patterns matched.", "hint": "Use execute(code=...)"}
+        md = render(result, "md", tool="validate")
+        assert "✓" in md or "no known issues" in md.lower() or "No known gotcha" in md
+
+    def test_issues_listed_with_severity(self):
+        result = {
+            "issues": [{"id": "x", "title": "T", "severity": "warning", "description": "D", "fix": "F"}],
+            "count": 1, "hint": "Fix then run execute.",
+        }
+        md = render(result, "md", tool="validate")
+        assert "x" in md and "warning" in md
+        assert "D" in md
+        assert "F" in md
+
+    def test_error_renders(self):
+        result = {"error": "Either 'code' or 'path' must be provided.", "hint": "validate(code=...)"}
+        md = render(result, "md", tool="validate")
+        assert "code" in md and "path" in md
+
+
+class TestReadFileRenderer:
+    def test_renders_path_heading_and_content(self):
+        result = {"path": "/tmp/x.mojo", "content": "def main(): pass\n"}
+        md = render(result, "md", tool="read_file")
+        assert "/tmp/x.mojo" in md
+        assert "def main()" in md
+
+    def test_uses_mojo_language_for_mojo_files(self):
+        result = {"path": "/tmp/x.mojo", "content": "fn main()\n", "hint": "Use validate"}
+        md = render(result, "md", tool="read_file")
+        assert "```mojo" in md or "mojo\n" in md
+
+    def test_uses_text_for_non_mojo(self):
+        result = {"path": "/tmp/x.txt", "content": "hello"}
+        md = render(result, "md", tool="read_file")
+        assert "/tmp/x.txt" in md
+
+    def test_truncation_note(self):
+        result = {"path": "/tmp/big.mojo", "content": "x" * 100, "truncated": True, "total_bytes": 999999, "hint": "..."}
+        md = render(result, "md", tool="read_file")
+        assert "truncated" in md.lower() or "999999" in md or "999,999" in md
+
+    def test_error_renders(self):
+        result = {"error": "Not a file: /missing"}
+        md = render(result, "md", tool="read_file")
+        assert "Not a file" in md
+
+
+class TestListFilesRenderer:
+    def test_files_listed(self):
+        result = {"path": "/tmp", "pattern": "**/*.mojo", "files": ["/tmp/a.mojo", "/tmp/b.mojo"], "count": 2, "hint": "Use read_file"}
+        md = render(result, "md", tool="list_files")
+        assert "/tmp/a.mojo" in md
+        assert "/tmp/b.mojo" in md
+        assert "2" in md
+
+    def test_empty_shows_message(self):
+        result = {"path": "/tmp", "pattern": "**/*.mojo", "files": [], "count": 0, "message": "0 files matching **/*.mojo in /tmp", "hint": "Try a different pattern."}
+        md = render(result, "md", tool="list_files")
+        assert "0 files" in md
+        assert "Try a different" in md
+
+    def test_truncated_includes_hint(self):
+        result = {"path": "/tmp", "pattern": "**/*.mojo", "files": ["f%d.mojo" % i for i in range(200)], "count": 200, "truncated": True, "hint": "Showing first 200."}
+        md = render(result, "md", tool="list_files")
+        assert "200" in md
+        assert "Showing first" in md
