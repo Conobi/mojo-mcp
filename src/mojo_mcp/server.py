@@ -23,7 +23,6 @@ from mcp.server.stdio import stdio_server
 from .docs import fetch_changelog, fetch_symbol_page, get_docs
 from .formatting import render
 from .sandbox import run_execute, run_install_mojo, run_list_files, run_mojo_version, run_read_file, run_search, run_update_server, run_validate
-from .sandbox import _json
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
