@@ -175,6 +175,73 @@ def _render_list_files(r: dict) -> str:
     return "\n".join(parts)
 
 
+@_register("lookup")
+def _render_lookup(r: dict) -> str:
+    if "error" in r:
+        return f"**Error:** {r['error']}" + (f"\n\n_{r['hint']}_" if r.get("hint") else "")
+    content = r.get("content", "")
+    url = r.get("url", "")
+    parts = [content]
+    if url:
+        parts.append(f"\n_source:_ <{url}>")
+    return "\n".join(parts)
+
+
+@_register("changelog")
+def _render_changelog(r: dict) -> str:
+    if "error" in r:
+        return f"**Error:** {r['error']}"
+    content = r.get("content", "")
+    version = r.get("version")
+    if version:
+        return f"{content}\n\n_version:_ `{version}`"
+    return content
+
+
+@_register("mojo_version")
+def _render_mojo_version(r: dict) -> str:
+    if "error" in r:
+        return f"**Error:** {r['error']}" + (f"\n\n_{r['hint']}_" if r.get("hint") else "")
+    parts: list[str] = []
+    if r.get("pinned"):
+        parts.append(f"**Pinned:** {r['pinned']}")
+    if r.get("active"):
+        parts.append(f"**Active:** {r['active']}")
+    if r.get("version_file"):
+        parts.append(f"**Source:** `{r['version_file']}`")
+    if r.get("global_binary"):
+        parts.append(f"**Global binary:** `{r['global_binary']}`")
+    if r.get("hint"):
+        parts.append(f"\n_{r['hint']}_")
+    return "\n".join(parts) or "(no version info)"
+
+
+@_register("install_mojo")
+def _render_install_mojo(r: dict) -> str:
+    if "error" in r:
+        return f"**Error:** {r['error']}" + (f"\n\n_{r['hint']}_" if r.get("hint") else "")
+    status = r.get("status", "ok")
+    parts = [f"**Status:** `{status}`"]
+    if r.get("version"):
+        parts.append(f"**Version:** {r['version']}")
+    if r.get("hint"):
+        parts.append(f"\n_{r['hint']}_")
+    return "\n".join(parts)
+
+
+@_register("update_server")
+def _render_update_server(r: dict) -> str:
+    if "error" in r:
+        return f"**Error:** {r['error']}"
+    status = r.get("status", "ok")
+    parts = [f"**Status:** `{status}`"]
+    if r.get("commit"):
+        parts.append(f"**Commit:** `{r['commit']}`")
+    if r.get("hint"):
+        parts.append(f"\n_{r['hint']}_")
+    return "\n".join(parts)
+
+
 @_register("execute")
 def _render_execute(r: dict) -> str:
     if "error" in r:

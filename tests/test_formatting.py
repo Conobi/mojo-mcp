@@ -191,3 +191,60 @@ class TestListFilesRenderer:
         md = render(result, "md", tool="list_files")
         assert "200" in md
         assert "Showing first" in md
+
+
+class TestLookupRenderer:
+    def test_md_passthrough(self):
+        # lookup `format="md"` receives a dict from server-layer adapter: {"content": "<md>", "url": "..."}
+        result = {"content": "# Symbol\n\nDescription.", "url": "https://docs.modular.com/x"}
+        md = render(result, "md", tool="lookup")
+        assert "# Symbol" in md
+        assert "Description." in md
+
+    def test_json_envelope_shape(self):
+        result = {"content": "# X", "url": "https://docs.modular.com/x"}
+        out = render(result, "json", tool="lookup")
+        assert '"content":"# X"' in out
+        assert '"url":"https://docs.modular.com/x"' in out
+
+    def test_error_renders(self):
+        result = {"error": "Symbol not found", "hint": "Try search()"}
+        md = render(result, "md", tool="lookup")
+        assert "Symbol not found" in md
+
+
+class TestChangelogRenderer:
+    def test_md_passthrough(self):
+        result = {"content": "## v25.5\n\n- change one", "version": "v25.5"}
+        md = render(result, "md", tool="changelog")
+        assert "## v25.5" in md
+        assert "change one" in md
+
+
+class TestMojoVersionRenderer:
+    def test_pinned_and_active(self):
+        result = {"pinned": "25.5.0", "active": "25.5.0", "version_file": "/proj/.mojo-version"}
+        md = render(result, "md", tool="mojo_version")
+        assert "25.5.0" in md
+        assert "/proj/.mojo-version" in md
+
+    def test_no_pinned(self):
+        result = {"active": "26.1.0"}
+        md = render(result, "md", tool="mojo_version")
+        assert "26.1.0" in md
+
+
+class TestInstallMojoRenderer:
+    def test_already_pinned(self):
+        result = {"status": "already_pinned", "version": "25.6.0", "hint": "use mojo_version"}
+        md = render(result, "md", tool="install_mojo")
+        assert "already_pinned" in md
+        assert "25.6.0" in md
+        assert "mojo_version" in md
+
+
+class TestUpdateServerRenderer:
+    def test_success(self):
+        result = {"status": "success", "commit": "abc123", "hint": "Restart Claude Code to load new version."}
+        md = render(result, "md", tool="update_server")
+        assert "success" in md.lower() or "abc123" in md
