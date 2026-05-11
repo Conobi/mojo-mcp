@@ -48,6 +48,15 @@ class TestSearchRenderer:
         assert "- foo" in md or "**foo**" in md
         assert "use lookup" in md
 
+    def test_list_of_name_description_dicts(self):
+        result = {"result": [
+            {"name": "Dict", "description": "Hash map."},
+            {"name": "List", "description": "Dynamic array."},
+        ], "hint": "use lookup"}
+        md = render(result, "md", tool="search")
+        assert "**Dict** — Hash map." in md
+        assert "**List** — Dynamic array." in md
+
     def test_dict_result_renders_as_yaml_or_keyvalue(self):
         result = {"result": {"a": 1, "b": 2}, "hint": "..."}
         md = render(result, "md", tool="search")

@@ -77,7 +77,12 @@ def _render_search(r: dict) -> str:
         data = r["result"]
         if isinstance(data, list):
             for item in data:
-                parts.append(f"- {item}")
+                if isinstance(item, dict) and "name" in item:
+                    name = item["name"]
+                    desc = item.get("description") or item.get("signature") or ""
+                    parts.append(f"- **{name}** — {desc}" if desc else f"- **{name}**")
+                else:
+                    parts.append(f"- {item}")
         elif isinstance(data, dict):
             for k, v in data.items():
                 parts.append(f"- **{k}:** {v}")
