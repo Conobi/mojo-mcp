@@ -334,9 +334,17 @@ import pytest
 
 class TestCallToolErrorHint:
     @pytest.mark.asyncio
-    async def test_unknown_tool_has_hint(self):
+    async def test_unknown_tool_md_default(self):
         from mojo_mcp.server import call_tool
         result = await call_tool("nonexistent_tool", {})
+        text = result[0].text
+        assert "nonexistent_tool" in text
+        assert "search" in text  # available tools listed
+
+    @pytest.mark.asyncio
+    async def test_unknown_tool_json_opt_in(self):
+        from mojo_mcp.server import call_tool
+        result = await call_tool("nonexistent_tool", {"format": "json"})
         parsed = json.loads(result[0].text)
         assert "error" in parsed
         assert "hint" in parsed

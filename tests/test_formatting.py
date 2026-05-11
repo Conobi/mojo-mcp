@@ -248,3 +248,41 @@ class TestUpdateServerRenderer:
         result = {"status": "success", "commit": "abc123", "hint": "Restart Claude Code to load new version."}
         md = render(result, "md", tool="update_server")
         assert "success" in md.lower() or "abc123" in md
+
+
+class TestServerFormatParam:
+    @pytest.mark.asyncio
+    async def test_search_defaults_to_md(self, monkeypatch):
+        from mojo_mcp import server
+        monkeypatch.setattr(server, "_docs", {"foo": {"name": "foo", "structs": [], "functions": [], "traits": [], "aliases": []}})
+        result = await server.call_tool("search", {"code": "return list(docs.keys())"})
+        text = result[0].text
+        # md output should NOT start with `{`
+        assert not text.lstrip().startswith("{")
+        assert "foo" in text
+
+    @pytest.mark.asyncio
+    async def test_search_explicit_json(self, monkeypatch):
+        from mojo_mcp import server
+        monkeypatch.setattr(server, "_docs", {"foo": {"name": "foo", "structs": [], "functions": [], "traits": [], "aliases": []}})
+        result = await server.call_tool("search", {"code": "return list(docs.keys())", "format": "json"})
+        text = result[0].text
+        parsed = json.loads(text)
+        assert "result" in parsed
+
+    @pytest.mark.asyncio
+    async def test_list_files_md_default(self, tmp_path):
+        from mojo_mcp import server
+        (tmp_path / "x.mojo").write_text("fn main(): pass\n")
+        result = await server.call_tool("list_files", {"path": str(tmp_path)})
+        text = result[0].text
+        assert "x.mojo" in text
+        assert not text.lstrip().startswith("{")
+
+    @pytest.mark.asyncio
+    async def test_unknown_tool_error_in_md(self):
+        from mojo_mcp import server
+        result = await server.call_tool("nonexistent_tool", {})
+        text = result[0].text
+        # md error must still be readable; json structure no longer guaranteed
+        assert "nonexistent_tool" in text or "Unknown tool" in text
