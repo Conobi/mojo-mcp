@@ -10,3 +10,9 @@ dist/
 docs/
 plans/
 specs/
+.claude/
+.research/
+research/
+docs/superpowers/
+docs/project-context.md
+CLAUDE.md
