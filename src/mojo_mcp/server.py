@@ -144,10 +144,12 @@ EXECUTE_TOOL = types.Tool(
 MOJO_VERSION_TOOL = types.Tool(
     name="mojo_version",
     description=(
-        "Report the active Mojo version(s). "
+        "Report the LOCALLY installed Mojo version(s). "
         "Returns the globally installed mojo binary version and, if a .mojo-version "
         "file is found by walking up from `path`, the project-pinned version and its file location. "
-        "Call this before executing to understand which version will be used."
+        "Call this before executing to understand which version will be used.\n\n"
+        "Does NOT query upstream — to find the latest RELEASED Mojo version, call "
+        "`changelog` with no arguments (returns the latest 2 published releases)."
     ),
     inputSchema={
         "type": "object",
@@ -313,12 +315,16 @@ CLI_TOOL = _handwritten_tool(
 CHANGELOG_TOOL = types.Tool(
     name="changelog",
     description=(
-        "Get the Mojo changelog. Cached for 7 days. "
-        "No version → latest 2 releases. "
-        "Pass version to filter: 'nightly', 'v26.1', 'v0.26.1', 'v25.5'. "
+        "Get the Mojo changelog from upstream (modular/modular). Cached for 7 days. "
+        "Authoritative source for 'what is the latest released Mojo version?' — "
+        "call with no arguments to get the latest 2 published releases (semver-sorted). "
+        "Pass version to filter: 'nightly', 'v26.1', 'v0.26.1', 'v25.5', 'v1.0.0b1'. "
         "Pass section to keep only matching `## ` headings (case-insensitive substring), "
-        "e.g. 'highlights', 'library', 'gpu', 'removed', 'fixed'. "
-        "Returns Markdown with language and stdlib changes."
+        "e.g. 'highlights', 'library', 'gpu', 'removed', 'fixed' — use 'highlights' "
+        "when you just want a quick summary of a release rather than the full body. "
+        "Returns Markdown with language and stdlib changes.\n\n"
+        "Note: `mojo_version` reports the LOCAL install, which is usually older than "
+        "the latest release — use this tool, not `mojo_version`, to answer 'latest'."
     ),
     inputSchema={
         "type": "object",
