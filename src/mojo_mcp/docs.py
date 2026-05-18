@@ -1,7 +1,9 @@
 """Scrape and cache the Mojo stdlib reference from docs.modular.com."""
 
+import asyncio
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -506,24 +508,183 @@ async def fetch_symbol_page(query: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 — changelog tool
+# Phase 3 — changelog tool (GitHub-backed)
 # ---------------------------------------------------------------------------
 
-CHANGELOG_URL = "https://docs.modular.com/mojo/changelog"
 CHANGELOG_CACHE_PATH = Path.home() / ".cache" / "mojo-mcp" / "changelog.json"
 CHANGELOG_CACHE_TTL = 604800  # 7 days
+CHANGELOG_CACHE_SCHEMA_VERSION = 3
+
+GITHUB_RELEASES_LISTING_URL = (
+    "https://api.github.com/repos/modular/modular/contents/mojo/docs/releases"
+)
+GITHUB_RAW_RELEASES_BASE = (
+    "https://raw.githubusercontent.com/modular/modular/main/mojo/docs/releases"
+)
+GITHUB_NIGHTLY_RAW_URL = (
+    "https://raw.githubusercontent.com/modular/modular/main/mojo/docs/nightly-changelog.md"
+)
+CHANGELOG_FETCH_CONCURRENCY = 8
+
+_VERSIONED_RELEASE_RE = re.compile(r"^v\d+(?:\.\d+)+(?:[abc]\d+)?$")
+_VERSION_PARTS_RE = re.compile(r"^v(\d+)\.(\d+)(?:\.(\d+))?(?:([abc])(\d+))?$")
+# Channel rank: stable highest, then rc, beta, alpha. Higher = closer to stable.
+_CHANNEL_RANK = {None: 4, "c": 3, "b": 2, "a": 1}
+
+
+def _github_auth_header() -> dict[str, str]:
+    """Return Authorization header dict if a GitHub token is present in env."""
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get(
+        "GITHUB_PERSONAL_ACCESS_TOKEN"
+    )
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def _build_changelog_headers() -> dict[str, str]:
+    return {
+        "User-Agent": "mojo-mcp/0.1 changelog-fetcher",
+        "Accept": "application/vnd.github+json",
+        **_github_auth_header(),
+    }
+
+
+def _build_changelog_http_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        timeout=30,
+        follow_redirects=True,
+        headers=_build_changelog_headers(),
+    )
+
+
+def _strip_frontmatter(md: str) -> tuple[dict[str, str], str]:
+    """Strip a leading YAML frontmatter block. Returns (front_dict, body).
+
+    Only handles the simple `key: value` lines used in the modular/modular
+    release files. Anything more elaborate falls through as part of the body.
+    """
+    if not md.startswith("---\n"):
+        return {}, md
+    end = md.find("\n---", 4)
+    if end == -1:
+        return {}, md
+    front_block = md[4:end]
+    rest_start = end + len("\n---")
+    if md[rest_start:rest_start + 1] == "\n":
+        rest_start += 1
+    body = md[rest_start:].lstrip("\n")
+    front: dict[str, str] = {}
+    for line in front_block.splitlines():
+        if ":" in line:
+            k, _, v = line.partition(":")
+            front[k.strip()] = v.strip()
+    return front, body
+
+
+def _version_key_from_filename(filename: str) -> str:
+    """Map a release-file name to its cache key."""
+    stem = filename.removesuffix(".md")
+    if stem == "nightly-changelog":
+        return "nightly"
+    return stem
+
+
+def _is_versioned_release(key: str) -> bool:
+    """True for `vX.Y[.Z][bN]` style keys; False for nightly/monthly/oddballs."""
+    return bool(_VERSIONED_RELEASE_RE.match(key))
+
+
+def _version_sort_key(key: str) -> tuple[int, int, int, int, int]:
+    """Sortable tuple for semver-like keys. Use with `reverse=True` for desc."""
+    m = _VERSION_PARTS_RE.match(key)
+    if not m:
+        return (-1, 0, 0, 0, 0)
+    major = int(m.group(1))
+    minor = int(m.group(2))
+    patch = int(m.group(3)) if m.group(3) else 0
+    channel = _CHANNEL_RANK[m.group(4)]
+    channel_num = int(m.group(5)) if m.group(5) else 0
+    return (major, minor, patch, channel, channel_num)
+
+
+async def _fetch_and_parse_changelog() -> dict:
+    """Fetch the changelog from the modular/modular GitHub repo.
+
+    Pulls the release-files listing via the GitHub Contents API, then fetches
+    each `vX.Y.Z.md` plus `nightly-changelog.md` as raw markdown. No HTML.
+    """
+    async with _build_changelog_http_client() as client:
+        listing_resp = await client.get(GITHUB_RELEASES_LISTING_URL)
+        listing_resp.raise_for_status()
+        listing = listing_resp.json()
+
+        targets: list[tuple[str, str, str | None]] = []
+        for entry in listing:
+            if not isinstance(entry, dict) or entry.get("type") != "file":
+                continue
+            name = entry.get("name", "")
+            if not isinstance(name, str) or not name.endswith(".md"):
+                continue
+            key = _version_key_from_filename(name)
+            url = entry.get("download_url") or f"{GITHUB_RAW_RELEASES_BASE}/{name}"
+            targets.append((key, url, entry.get("sha")))
+
+        targets.append(("nightly", GITHUB_NIGHTLY_RAW_URL, None))
+
+        sem = asyncio.Semaphore(CHANGELOG_FETCH_CONCURRENCY)
+
+        async def _fetch_one(
+            key: str, url: str, sha: str | None
+        ) -> tuple[str, dict] | None:
+            async with sem:
+                try:
+                    r = await client.get(url)
+                    r.raise_for_status()
+                except Exception as e:
+                    logger.warning("Failed to fetch %s: %s", url, e)
+                    return None
+                front, body = _strip_frontmatter(r.text)
+                heading = front.get("title") or key
+                entry: dict = {"heading": heading, "markdown": body}
+                if sha:
+                    entry["sha"] = sha
+                return key, entry
+
+        results = await asyncio.gather(
+            *(_fetch_one(k, u, s) for k, u, s in targets)
+        )
+
+    data: dict = {
+        "_schema_version": CHANGELOG_CACHE_SCHEMA_VERSION,
+        "_fetched_at": time.time(),
+    }
+    for r in results:
+        if r is None:
+            continue
+        key, entry = r
+        data[key] = entry
+    return data
 
 
 def _load_changelog_cache() -> dict | None:
     if not CHANGELOG_CACHE_PATH.exists():
         return None
-    age = time.time() - CHANGELOG_CACHE_PATH.stat().st_mtime
-    if age > CHANGELOG_CACHE_TTL:
-        return None
     try:
-        return json.loads(CHANGELOG_CACHE_PATH.read_text())
+        data = json.loads(CHANGELOG_CACHE_PATH.read_text())
     except Exception:
         return None
+    if not isinstance(data, dict):
+        return None
+    schema = data.get("_schema_version")
+    if schema != CHANGELOG_CACHE_SCHEMA_VERSION:
+        logger.info(
+            "rebuilding changelog cache: schema_version=%r -> %d",
+            schema, CHANGELOG_CACHE_SCHEMA_VERSION,
+        )
+        return None
+    fetched_at = data.get("_fetched_at", 0)
+    if time.time() - fetched_at > CHANGELOG_CACHE_TTL:
+        return None
+    return data
 
 
 def _save_changelog_cache(data: dict) -> None:
@@ -531,86 +692,21 @@ def _save_changelog_cache(data: dict) -> None:
     CHANGELOG_CACHE_PATH.write_text(json.dumps(data, indent=2))
 
 
-def _normalize_version_key(heading: str) -> str:
-    """Normalize a changelog H2 heading to a short version key."""
-    h = heading.strip()
-    if h.lower().startswith("nightly"):
-        return "nightly"
-    # Strip date suffix like " (2026-01-29)"
-    h = re.sub(r"\s*\(.*?\)", "", h).strip()
-    return h  # e.g. "v0.26.1" or "v25.5"
-
-
-async def _fetch_and_parse_changelog() -> dict:
-    """Fetch the Mojo changelog page and parse it into version-keyed markdown."""
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        resp = await client.get(CHANGELOG_URL)
-        resp.raise_for_status()
-
-    soup = BeautifulSoup(resp.text, "lxml")
-    article = soup.find("article") or soup.find("main") or soup
-
-    data: dict = {"_fetched_at": time.time()}
-
-    def _section_to_lines(section: Tag) -> list[str]:
-        lines: list[str] = []
-        for el in section.children:
-            if not isinstance(el, Tag):
-                continue
-            if el.name == "h2":
-                continue  # already used as heading
-            elif el.name == "h3":
-                lines += [f"### {_text(el)}", ""]
-            elif el.name == "ul":
-                for li in el.find_all("li", recursive=False):
-                    lines.append(f"- {li.get_text(separator=' ', strip=True)}")
-                lines.append("")
-            elif el.name == "p":
-                t = _text(el)
-                if t:
-                    lines += [t, ""]
-            elif el.name == "section":
-                # Nested subsection: h3 header + ul bullets
-                for sub in el.children:
-                    if not isinstance(sub, Tag):
-                        continue
-                    if sub.name == "h3":
-                        lines += [f"### {_text(sub)}", ""]
-                    elif sub.name == "ul":
-                        for li in sub.find_all("li", recursive=False):
-                            lines.append(f"- {li.get_text(separator=' ', strip=True)}")
-                        lines.append("")
-                    elif sub.name == "p":
-                        t = _text(sub)
-                        if t:
-                            lines += [t, ""]
-        return lines
-
-    # Top-level version sections have an <h2> as direct child
-    for section in article.find_all("section"):  # type: ignore[union-attr]
-        h2 = section.find("h2", recursive=False)
-        if not h2:
-            continue
-        heading = _text(h2)
-        if not heading:
-            continue
-        key = _normalize_version_key(heading)
-        lines = [f"## {heading}", ""] + _section_to_lines(section)
-        data[key] = {"heading": heading, "markdown": "\n".join(lines)}
-
-    return data
+def _has_version_entries(data: dict) -> bool:
+    return any(not k.startswith("_") for k in data)
 
 
 def _match_version(user_input: str | None, keys: list[str]) -> list[str]:
-    """Return matching version keys for user_input."""
+    """Return matching version keys for `user_input`."""
     version_keys = [k for k in keys if not k.startswith("_")]
     if not user_input or user_input.lower() in ("latest", ""):
-        return version_keys[:2]
+        sortable = [k for k in version_keys if _is_versioned_release(k)]
+        sortable.sort(key=_version_sort_key, reverse=True)
+        return sortable[:2]
     q = user_input.lower().strip()
     if q == "nightly":
         return ["nightly"] if "nightly" in version_keys else []
-    # Suffix match: "v26.1" matches "v0.26.1"
-    matches = []
+    matches: list[str] = []
     for k in version_keys:
         k_stripped = k.lstrip("v").lstrip("0").lstrip(".")
         q_stripped = q.lstrip("v").lstrip("0").lstrip(".")
@@ -620,10 +716,17 @@ def _match_version(user_input: str | None, keys: list[str]) -> list[str]:
 
 
 async def fetch_changelog(version: str | None = None) -> str:
-    """Fetch Mojo changelog as Markdown, optionally filtered by version."""
+    """Fetch the Mojo changelog as Markdown, optionally filtered by version."""
     data = _load_changelog_cache()
     if not data:
         data = await _fetch_and_parse_changelog()
+        if not _has_version_entries(data):
+            return (
+                "Error: changelog fetch returned no versions — GitHub may be "
+                "unreachable, rate-limiting, or the modular/modular repo layout "
+                "changed. Cache was not written; retry shortly or set GITHUB_TOKEN "
+                "to raise the rate limit."
+            )
         _save_changelog_cache(data)
 
     keys = list(data.keys())
