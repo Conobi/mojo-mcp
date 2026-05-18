@@ -720,8 +720,52 @@ def _match_version(user_input: str | None, keys: list[str]) -> list[str]:
     return matches
 
 
-async def fetch_changelog(version: str | None = None) -> str:
-    """Fetch the Mojo changelog as Markdown, optionally filtered by version."""
+_SECTION_HEADING_RE = re.compile(r"^## .+$", re.MULTILINE)
+_SECTION_ANCHOR_RE = re.compile(r"\s*\{#[^}]*\}\s*$")
+
+
+def _section_heading_text(line: str) -> str:
+    stripped = _SECTION_ANCHOR_RE.sub("", line).removeprefix("## ").strip()
+    return stripped.lower()
+
+
+def _filter_sections(markdown: str, section: str) -> str:
+    """Return `## ` sections whose heading matches `section` (case-insensitive substring).
+
+    Multiple matches (e.g. two `## Highlights` blocks from concatenated releases) are
+    kept in document order and joined with a blank line.
+    """
+    needle = (section or "").strip().lower()
+    if not needle or not markdown:
+        return ""
+    matches = list(_SECTION_HEADING_RE.finditer(markdown))
+    if not matches:
+        return ""
+    kept: list[str] = []
+    for i, m in enumerate(matches):
+        if needle not in _section_heading_text(m.group(0)):
+            continue
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(markdown)
+        kept.append(markdown[start:end].rstrip())
+    return "\n\n".join(kept)
+
+
+def _available_section_names(markdown: str) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for line in _SECTION_HEADING_RE.findall(markdown):
+        name = _SECTION_ANCHOR_RE.sub("", line).removeprefix("## ").strip()
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(name)
+    return out
+
+
+async def fetch_changelog(version: str | None = None, section: str | None = None) -> str:
+    """Fetch the Mojo changelog as Markdown, optionally filtered by version and section."""
     data = _load_changelog_cache()
     if not data:
         data = await _fetch_and_parse_changelog()
@@ -749,4 +793,14 @@ async def fetch_changelog(version: str | None = None) -> str:
         entry = data.get(k, {})
         sections.append(entry.get("markdown", f"## {k}\n\n(no content)"))
 
-    return "\n\n".join(sections)
+    combined = "\n\n".join(sections)
+    if section:
+        filtered = _filter_sections(combined, section)
+        if not filtered:
+            available = _available_section_names(combined)
+            return (
+                f"No section matching {section!r} found in {', '.join(matched)}.\n"
+                f"Available sections: {', '.join(available)}"
+            )
+        return filtered
+    return combined

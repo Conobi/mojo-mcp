@@ -316,6 +316,8 @@ CHANGELOG_TOOL = types.Tool(
         "Get the Mojo changelog. Cached for 7 days. "
         "No version → latest 2 releases. "
         "Pass version to filter: 'nightly', 'v26.1', 'v0.26.1', 'v25.5'. "
+        "Pass section to keep only matching `## ` headings (case-insensitive substring), "
+        "e.g. 'highlights', 'library', 'gpu', 'removed', 'fixed'. "
         "Returns Markdown with language and stdlib changes."
     ),
     inputSchema={
@@ -324,6 +326,13 @@ CHANGELOG_TOOL = types.Tool(
             "version": {
                 "type": "string",
                 "description": "Optional version. Examples: 'nightly', 'v26.1', 'v0.25.7'.",
+            },
+            "section": {
+                "type": "string",
+                "description": (
+                    "Optional `## ` section filter (case-insensitive substring). "
+                    "Examples: 'highlights', 'library', 'gpu', 'removed', 'fixed'."
+                ),
             },
             "format": _FORMAT_PROP,
         },
@@ -486,8 +495,13 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         result_dict = {"content": md, "url": ""}
 
     elif name == "changelog":
-        md = await fetch_changelog(arguments.get("version"))
+        md = await fetch_changelog(
+            arguments.get("version"),
+            section=arguments.get("section"),
+        )
         result_dict = {"content": md, "version": arguments.get("version") or "latest"}
+        if arguments.get("section"):
+            result_dict["section"] = arguments["section"]
 
     elif name in ("manual", "reference", "cli"):
         topic = arguments.get("topic")

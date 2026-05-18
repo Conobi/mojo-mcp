@@ -79,6 +79,14 @@ date: 2026-03-19
 ## Highlights
 
 - Did a thing in {title}.
+
+## Library changes
+
+- Library bullet for {title}.
+
+## Removed
+
+- Removed bullet for {title}.
 """
 
 
@@ -344,3 +352,70 @@ class TestFetchChangelogIntegration:
         _install_mock_transport(monkeypatch)
         out = await docs_mod.fetch_changelog("nightly")
         assert "Nightly bullet" in out
+
+
+# ---------------------------------------------------------------------------
+# Section filter
+# ---------------------------------------------------------------------------
+
+
+class TestFilterSections:
+    def test_returns_only_matching_section(self):
+        md = "## Highlights\n\n- a\n\n## Library changes\n\n- b\n\n## Fixed\n\n- c\n"
+        out = docs_mod._filter_sections(md, "highlights")
+        assert "## Highlights" in out
+        assert "## Library changes" not in out
+        assert "## Fixed" not in out
+
+    def test_substring_match_is_case_insensitive(self):
+        md = "## Highlights\n\n- a\n\n## Library changes\n\n- b\n"
+        out = docs_mod._filter_sections(md, "LIBRARY")
+        assert "## Library changes" in out
+        assert "## Highlights" not in out
+
+    def test_strips_anchor_refs_in_match(self):
+        md = "## Highlights {#1-0-0-b1-highlights}\n\n- a\n\n## Removed\n\n- b\n"
+        out = docs_mod._filter_sections(md, "highlights")
+        assert "## Highlights {#1-0-0-b1-highlights}" in out
+        assert "## Removed" not in out
+
+    def test_returns_all_matching_sections_in_order(self):
+        md = (
+            "## Highlights {#a-1}\n\n- first\n\n## Removed\n\n- old\n\n"
+            "## Highlights {#a-2}\n\n- second\n"
+        )
+        out = docs_mod._filter_sections(md, "highlights")
+        assert "first" in out
+        assert "second" in out
+        assert out.index("first") < out.index("second")
+        assert "## Removed" not in out
+
+    def test_no_match_returns_empty(self):
+        md = "## Highlights\n\n- a\n"
+        assert docs_mod._filter_sections(md, "doesnotexist") == ""
+
+    def test_no_headings_returns_empty(self):
+        assert docs_mod._filter_sections("just text", "highlights") == ""
+
+
+@pytest.mark.asyncio
+class TestFetchChangelogSectionFilter:
+    async def test_section_filter_returns_only_that_section(
+        self, monkeypatch, clean_github_env, tmp_changelog_cache,
+    ):
+        _install_mock_transport(monkeypatch)
+        out = await docs_mod.fetch_changelog("v0.26.2", section="library")
+        assert "## Library changes" in out
+        assert "## Highlights" not in out
+        assert "## Removed" not in out
+
+    async def test_section_filter_no_match_lists_available_sections(
+        self, monkeypatch, clean_github_env, tmp_changelog_cache,
+    ):
+        _install_mock_transport(monkeypatch)
+        out = await docs_mod.fetch_changelog("v0.26.2", section="nonexistent")
+        lower = out.lower()
+        assert "no section" in lower or "not found" in lower
+        # Hint should list real section names from the body so the agent can retry.
+        assert "highlights" in lower
+        assert "library" in lower
