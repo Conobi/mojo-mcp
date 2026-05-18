@@ -66,6 +66,7 @@ def _find_mojo_version_file(cwd: str | None) -> tuple[Path | None, str | None]:
 
 
 _LEGACY_CALVER_MAJOR_RE = re.compile(r"^(\d+)\.")
+_PRERELEASE_SUFFIX_RE = re.compile(r"[abc]\d+|rc\d+", re.IGNORECASE)
 
 
 def _normalize_mojo_compiler_version(version: str) -> str:
@@ -87,17 +88,28 @@ def _normalize_mojo_compiler_version(version: str) -> str:
     return version
 
 
+def _is_prerelease(version: str) -> bool:
+    """Whether a normalized version string carries a pre-release suffix (b1, a2, rc1)."""
+    return bool(_PRERELEASE_SUFFIX_RE.search(version))
+
+
 def _mojo_cmd(version: str | None, cwd: str | None = None) -> list[str]:
     """Return the mojo command prefix for a given version.
 
     With a version: uses uvx --from mojo-compiler==<version> mojo (cached per version).
       Version strings are normalized via `_normalize_mojo_compiler_version` to match
       the two PyPI publishing schemes (legacy `0.`-prefixed calver vs modern semver).
+      Pre-release pins (e.g. `1.0.0b1`) also need `--prerelease=allow` so uv will
+      consider pre-release versions of transitive deps like `mojo-compiler-mojo-libs`.
     Without: uses mojox from the project venv if available, else system mojo.
     """
     if version:
         version = _normalize_mojo_compiler_version(version)
-        return ["uvx", "--from", f"mojo-compiler=={version}", "mojo"]
+        cmd = ["uvx", "--from", f"mojo-compiler=={version}"]
+        if _is_prerelease(version):
+            cmd += ["--prerelease=allow"]
+        cmd += ["mojo"]
+        return cmd
 
     # Check for mojox in the project's venv
     if cwd:

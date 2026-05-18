@@ -31,12 +31,19 @@ class TestMojoCmdVersion:
     def test_modern_semver_beta_not_prefixed(self):
         # Regression: 1.0.0b1 must NOT become 0.1.0.0b1 (PyPI has no such version)
         cmd = _mojo_cmd("1.0.0b1")
-        assert cmd == ["uvx", "--from", "mojo-compiler==1.0.0b1", "mojo"]
+        # Pre-release pins also need --prerelease=allow for transitive deps
+        assert cmd == ["uvx", "--from", "mojo-compiler==1.0.0b1", "--prerelease=allow", "mojo"]
 
     def test_modern_semver_release_not_prefixed(self):
+        # Stable release: no --prerelease flag (transitive deps should resolve to stable too)
         cmd = _mojo_cmd("1.0.0")
         assert cmd == ["uvx", "--from", "mojo-compiler==1.0.0", "mojo"]
 
     def test_modern_semver_alpha_not_prefixed(self):
         cmd = _mojo_cmd("1.0.0a2")
-        assert cmd == ["uvx", "--from", "mojo-compiler==1.0.0a2", "mojo"]
+        assert cmd == ["uvx", "--from", "mojo-compiler==1.0.0a2", "--prerelease=allow", "mojo"]
+
+    def test_legacy_does_not_get_prerelease_flag(self):
+        # Sanity: stable calver versions don't need --prerelease=allow
+        cmd = _mojo_cmd("25.6.0")
+        assert "--prerelease=allow" not in cmd
