@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from mojo_mcp import docs as docs_mod
+from mojo_mcp import docs_backend as db
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +94,7 @@ title: Mojo nightly
 
 def _install_mock_transport(monkeypatch, *, captured: list[httpx.Request] | None = None,
                             empty_listing: bool = False):
-    """Patch docs_mod._build_changelog_http_client to use a MockTransport."""
+    """Patch db.build_github_client to use a MockTransport."""
 
     def _handler(request: httpx.Request) -> httpx.Response:
         if captured is not None:
@@ -119,11 +120,11 @@ def _install_mock_transport(monkeypatch, *, captured: list[httpx.Request] | None
     def _factory():
         return httpx.AsyncClient(
             transport=httpx.MockTransport(_handler),
-            headers=docs_mod._build_changelog_headers(),
+            headers=db.github_headers(),
             timeout=30,
         )
 
-    monkeypatch.setattr(docs_mod, "_build_changelog_http_client", _factory)
+    monkeypatch.setattr(db, "build_github_client", _factory)
 
 
 # ---------------------------------------------------------------------------
@@ -134,18 +135,18 @@ def _install_mock_transport(monkeypatch, *, captured: list[httpx.Request] | None
 class TestStripFrontmatter:
     def test_strips_yaml_block_at_start(self):
         md = "---\ntitle: Mojo v0.26.2\nversion: 0.26.2.0\n---\n\n## Highlights\n\n- thing\n"
-        front, body = docs_mod._strip_frontmatter(md)
+        front, body = db.strip_frontmatter(md)
         assert front == {"title": "Mojo v0.26.2", "version": "0.26.2.0"}
         assert body.startswith("## Highlights")
 
     def test_no_frontmatter_returns_body_unchanged(self):
         md = "## Highlights\n\n- thing\n"
-        front, body = docs_mod._strip_frontmatter(md)
+        front, body = db.strip_frontmatter(md)
         assert front == {}
         assert body == md
 
     def test_handles_empty_string(self):
-        front, body = docs_mod._strip_frontmatter("")
+        front, body = db.strip_frontmatter("")
         assert front == {}
         assert body == ""
 
@@ -196,20 +197,20 @@ class TestVersionSortKey:
 
 class TestGithubAuthHeader:
     def test_returns_empty_when_no_token(self, clean_github_env):
-        assert docs_mod._github_auth_header() == {}
+        assert db.github_auth_header() == {}
 
     def test_uses_github_token(self, clean_github_env, monkeypatch):
         monkeypatch.setenv("GITHUB_TOKEN", "tok_a")
-        assert docs_mod._github_auth_header() == {"Authorization": "Bearer tok_a"}
+        assert db.github_auth_header() == {"Authorization": "Bearer tok_a"}
 
     def test_falls_back_to_personal_access_token(self, clean_github_env, monkeypatch):
         monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", "tok_b")
-        assert docs_mod._github_auth_header() == {"Authorization": "Bearer tok_b"}
+        assert db.github_auth_header() == {"Authorization": "Bearer tok_b"}
 
     def test_github_token_wins_over_personal(self, clean_github_env, monkeypatch):
         monkeypatch.setenv("GITHUB_TOKEN", "tok_a")
         monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", "tok_b")
-        assert docs_mod._github_auth_header() == {"Authorization": "Bearer tok_a"}
+        assert db.github_auth_header() == {"Authorization": "Bearer tok_a"}
 
 
 # ---------------------------------------------------------------------------

@@ -198,19 +198,46 @@ def _render_changelog(r: dict) -> str:
     return content
 
 
+def _render_handwritten(r: dict) -> str:
+    if "error" in r:
+        return f"**Error:** {r['error']}" + (f"\n\n_{r['hint']}_" if r.get("hint") else "")
+    content = r.get("content", "")
+    ref = r.get("ref")
+    topic = r.get("topic")
+    footer_parts = []
+    if topic:
+        footer_parts.append(f"topic: `{topic}`")
+    if ref:
+        footer_parts.append(f"ref: `{ref}`")
+    if footer_parts:
+        return f"{content}\n\n_{' · '.join(footer_parts)}_"
+    return content
+
+
+_RENDERERS["manual"] = _render_handwritten
+_RENDERERS["reference"] = _render_handwritten
+_RENDERERS["cli"] = _render_handwritten
+
+
 @_register("mojo_version")
 def _render_mojo_version(r: dict) -> str:
     if "error" in r:
         return f"**Error:** {r['error']}" + (f"\n\n_{r['hint']}_" if r.get("hint") else "")
     parts: list[str] = []
-    if r.get("pinned"):
-        parts.append(f"**Pinned:** {r['pinned']}")
-    if r.get("active"):
-        parts.append(f"**Active:** {r['active']}")
+    # Accept both the production shape ({global_version, pinned_version, ...})
+    # and the legacy test shape ({active, pinned, ...}).
+    pinned = r.get("pinned_version") or r.get("pinned")
+    active = r.get("global_version") or r.get("active")
+    if pinned:
+        parts.append(f"**Pinned:** {pinned}")
+    if active:
+        parts.append(f"**Active:** {active}")
     if r.get("version_file"):
         parts.append(f"**Source:** `{r['version_file']}`")
     if r.get("global_binary"):
         parts.append(f"**Global binary:** `{r['global_binary']}`")
+    if r.get("docs_ref"):
+        parts.append(f"**Docs ref:** `{r['docs_ref']}`")
     if r.get("hint"):
         parts.append(f"\n_{r['hint']}_")
     return "\n".join(parts) or "(no version info)"

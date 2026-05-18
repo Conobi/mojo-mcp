@@ -20,7 +20,8 @@ import mcp.types as types
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 
-from .docs import fetch_changelog, fetch_symbol_page, get_docs
+from .docs import fetch_changelog, fetch_handwritten, fetch_symbol_page, get_docs
+from .docs_backend import resolve_mojo_ref
 from .formatting import render
 from .sandbox import run_execute, run_install_mojo, run_list_files, run_mojo_version, run_read_file, run_search, run_update_server, run_validate
 
@@ -243,8 +244,10 @@ LOOKUP_TOOL = types.Tool(
     description=(
         "Fetch full documentation for a specific Mojo symbol. "
         "Input: dot-notation path like 'collections.dict.Dict' or 'math.math.abs'. "
-        "Returns Markdown with full signature, parameters, methods (structs), args/returns (functions). "
-        "Use `search` to discover names, then `lookup` for full details."
+        "Returns Markdown with full signature, parameters, and docstring extracted "
+        "from the matching version-pinned `.mojo` source. Pass `mojo_version` to "
+        "force a specific version; auto-detected otherwise. Falls back to "
+        "mojolang.org's rendered `.md` page when the source path can't be resolved."
     ),
     inputSchema={
         "type": "object",
@@ -253,10 +256,58 @@ LOOKUP_TOOL = types.Tool(
                 "type": "string",
                 "description": "Dot-notation symbol path. E.g. 'collections.dict.Dict', 'builtin.int.Int'.",
             },
+            "mojo_version": {
+                "type": "string",
+                "description": "Optional Mojo version override. E.g. '0.26.2', 'v26.2'. Auto-detected if omitted.",
+            },
             "format": _FORMAT_PROP,
         },
         "required": ["query"],
     },
+)
+
+
+def _handwritten_tool(name: str, surface_label: str, examples: str) -> types.Tool:
+    return types.Tool(
+        name=name,
+        description=(
+            f"Fetch the Mojo {surface_label} documentation, sourced from "
+            f"`modular/modular@<tag>/mojo/docs/...` at the version matching your "
+            f"installed Mojo. With no `topic`, returns a table of contents of "
+            f"available pages. With `topic`, returns that page's markdown verbatim. "
+            f"Examples: {examples}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "Optional page name (e.g. 'basics', 'lifecycle/death'). Omit for the index.",
+                },
+                "mojo_version": {
+                    "type": "string",
+                    "description": "Optional Mojo version override. Auto-detected if omitted.",
+                },
+                "format": _FORMAT_PROP,
+            },
+            "required": [],
+        },
+    )
+
+
+MANUAL_TOOL = _handwritten_tool(
+    "manual", "manual",
+    "topic='basics', topic='lifecycle/death', topic='python'.",
+)
+
+REFERENCE_TOOL = _handwritten_tool(
+    "reference", "language reference",
+    "topic='compound-statements', topic='decorators/parameter', topic='operators'.",
+)
+
+CLI_TOOL = _handwritten_tool(
+    "cli", "CLI / tools reference",
+    "topic='mojo-doc', topic='mojo-build'.",
 )
 
 CHANGELOG_TOOL = types.Tool(
@@ -324,6 +375,9 @@ async def list_tools() -> list[types.Tool]:
         LIST_FILES_TOOL,
         LOOKUP_TOOL,
         CHANGELOG_TOOL,
+        MANUAL_TOOL,
+        REFERENCE_TOOL,
+        CLI_TOOL,
         VALIDATE_TOOL,
     ]
 
@@ -392,6 +446,15 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     elif name == "mojo_version":
         raw = await loop.run_in_executor(None, run_mojo_version, arguments.get("path"))
         result_dict = _to_dict(raw)
+        if "error" not in result_dict:
+            effective_version = (
+                result_dict.get("pinned_version")
+                or result_dict.get("global_version")
+            )
+            try:
+                result_dict["docs_ref"] = await resolve_mojo_ref(effective_version)
+            except Exception as e:
+                logger.warning("resolve_mojo_ref failed: %s", e)
 
     elif name == "update_server":
         raw = await loop.run_in_executor(None, run_update_server)
@@ -416,12 +479,24 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         result_dict = _to_dict(raw)
 
     elif name == "lookup":
-        md = await fetch_symbol_page(arguments.get("query", ""))
+        md = await fetch_symbol_page(
+            arguments.get("query", ""),
+            mojo_version=arguments.get("mojo_version"),
+        )
         result_dict = {"content": md, "url": ""}
 
     elif name == "changelog":
         md = await fetch_changelog(arguments.get("version"))
         result_dict = {"content": md, "version": arguments.get("version") or "latest"}
+
+    elif name in ("manual", "reference", "cli"):
+        topic = arguments.get("topic")
+        md = await fetch_handwritten(
+            name,
+            topic=topic,
+            mojo_version=arguments.get("mojo_version"),
+        )
+        result_dict = {"content": md, "topic": topic or ""}
 
     elif name == "validate":
         raw = await loop.run_in_executor(
@@ -433,7 +508,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     else:
         result_dict = {
             "error": f"Unknown tool: {name}",
-            "hint": "Available tools: search, execute, lookup, changelog, validate, read_file, list_files, mojo_version, install_mojo, update_server",
+            "hint": "Available tools: search, execute, lookup, changelog, manual, reference, cli, validate, read_file, list_files, mojo_version, install_mojo, update_server",
         }
         return [types.TextContent(type="text", text=render(result_dict, fmt, tool="search"))]
 
