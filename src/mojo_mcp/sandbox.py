@@ -65,20 +65,38 @@ def _find_mojo_version_file(cwd: str | None) -> tuple[Path | None, str | None]:
     return None, None
 
 
+_LEGACY_CALVER_MAJOR_RE = re.compile(r"^(\d+)\.")
+
+
+def _normalize_mojo_compiler_version(version: str) -> str:
+    """Normalize a .mojo-version string to a PyPI `mojo-compiler` version.
+
+    Two schemes coexist on PyPI:
+      - Legacy calver (Mojo 24.x/25.x/26.x): published as `0.<major>.<minor>.<patch>`.
+        `.mojo-version` files write the un-prefixed form (e.g. `25.6.0`), so we
+        prepend `0.` here.
+      - Modern semver (Mojo 1.0+): published verbatim (e.g. `1.0.0b1`). No prefix.
+
+    Already-prefixed `0.X.Y.Z` strings are left alone.
+    """
+    if version.startswith("0."):
+        return version
+    m = _LEGACY_CALVER_MAJOR_RE.match(version)
+    if m and int(m.group(1)) >= 24:
+        return f"0.{version}"
+    return version
+
+
 def _mojo_cmd(version: str | None, cwd: str | None = None) -> list[str]:
     """Return the mojo command prefix for a given version.
 
     With a version: uses uvx --from mojo-compiler==<version> mojo (cached per version).
-      .mojo-version files use the modular version format (e.g. "25.6.0"), but
-      mojo-compiler on PyPI uses a "0."-prefixed format (e.g. "0.25.6.0").
-      We normalise automatically.
+      Version strings are normalized via `_normalize_mojo_compiler_version` to match
+      the two PyPI publishing schemes (legacy `0.`-prefixed calver vs modern semver).
     Without: uses mojox from the project venv if available, else system mojo.
     """
     if version:
-        # Normalise "25.6.0" → "0.25.6.0" for mojo-compiler on PyPI.
-        # Already-prefixed versions like "0.25.6.0" are left unchanged.
-        if not version.startswith("0."):
-            version = f"0.{version}"
+        version = _normalize_mojo_compiler_version(version)
         return ["uvx", "--from", f"mojo-compiler=={version}", "mojo"]
 
     # Check for mojox in the project's venv
