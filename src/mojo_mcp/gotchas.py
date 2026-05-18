@@ -7,9 +7,22 @@ from pathlib import Path
 import yaml
 
 
+_NUMERIC_PREFIX_RE = re.compile(r"^(\d+)")
+
+
 def _parse_version(v: str) -> tuple[int, ...]:
-    """Parse '0.26.2' or '26.2' into a comparable tuple."""
-    return tuple(int(x) for x in v.strip().split("."))
+    """Parse '0.26.2', '26.2', or '1.0.0b1' into a comparable tuple.
+
+    Per-segment pre-release suffixes (`b1`, `a2`, `rc1`, …) are stripped, so
+    `1.0.0b1` parses as `(1, 0, 0)` — gotchas keyed to `>=1.0.0` then apply to
+    the beta. Non-numeric segments are skipped.
+    """
+    parts: list[int] = []
+    for segment in v.strip().split("."):
+        m = _NUMERIC_PREFIX_RE.match(segment)
+        if m:
+            parts.append(int(m.group(1)))
+    return tuple(parts)
 
 
 def _version_matches(mojo_version: str, ranges: list[str]) -> bool:

@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from mojo_mcp.gotchas import enrich_error, load_gotchas, validate_code
+from mojo_mcp.gotchas import _parse_version, enrich_error, load_gotchas, validate_code
 
 
 class TestLoadGotchas:
@@ -205,6 +205,38 @@ class TestEnrichError:
         hints = enrich_error(stderr, timed_out=False, mojo_version="0.26.2")
         ids = [h["id"] for h in hints]
         assert "raw-pointer-needs-unsafe" in ids
+
+
+class TestParseVersion:
+    """Version parsing must tolerate pre-release suffixes (Mojo 1.0.0b1 etc.)."""
+
+    def test_plain_semver(self):
+        assert _parse_version("0.26.2") == (0, 26, 2)
+
+    def test_two_segments(self):
+        assert _parse_version("26.2") == (26, 2)
+
+    def test_pre_release_beta(self):
+        # 1.0.0b1 is the Mojo 1.0 beta — must not crash, treated as 1.0.0
+        assert _parse_version("1.0.0b1") == (1, 0, 0)
+
+    def test_pre_release_alpha(self):
+        assert _parse_version("1.0.0a2") == (1, 0, 0)
+
+    def test_pre_release_in_range(self):
+        # Gotchas keyed to ">=1.0.0" should match the 1.0.0 beta
+        from mojo_mcp.gotchas import _version_matches
+        assert _version_matches("1.0.0b1", [">=1.0.0"])
+
+    def test_enrich_error_does_not_raise_on_pre_release(self):
+        # Regression: execute()'s error-enrichment path passed raw "1.0.0b1"
+        # straight into _parse_version, which threw int('0b1') ValueError.
+        hints = enrich_error("error: some error\n", timed_out=False, mojo_version="1.0.0b1")
+        assert isinstance(hints, list)
+
+    def test_validate_code_does_not_raise_on_pre_release(self):
+        issues = validate_code("def main():\n    pass\n", "1.0.0b1")
+        assert isinstance(issues, list)
 
 
 class TestValidateCodeAuditAdditions:
