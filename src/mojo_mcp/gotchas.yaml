@@ -354,3 +354,84 @@ gotchas:
     description: "Public functions that may dereference an UnsafePointer must opt in to unsafe semantics. Mojo refuses to expose pointer-dereferencing APIs as safe-by-default."
     fix: "Mark the function `unsafe` (e.g. `unsafe def read_at(ptr: UnsafePointer[UInt8], i: Int) -> UInt8:`), make it `private` / module-local, or wrap the pointer access behind a safe abstraction that validates bounds before dereferencing."
     link: null
+
+  # -- 2026-05-19 Mojo 1.0.0b1 idiom audit --
+  # Sourced from dixi/docs/mojo-1.0.0b1-idioms.md (plan-17a/17b validated)
+  # and spot-checked with `mcp__mojo-mcp__execute` against 1.0.0b1.
+
+  - id: alias-deprecated
+    title: "`alias` deprecated — use `comptime`"
+    severity: warning
+    mojo_versions: [">=1.0.0b1"]
+    code_pattern: "^\\s*alias\\s+\\w+\\s*="
+    error_pattern: "'alias' is deprecated; use 'comptime'"
+    timeout_pattern: false
+    description: "Since Mojo 1.0.0b1, `alias FOO = ...` for compile-time bindings is deprecated in favor of `comptime FOO = ...`. The old form still compiles but emits a deprecation warning."
+    fix: "Replace `alias FOO = ...` with `comptime FOO = ...`."
+    link: null
+
+  - id: del-var-self-hangs
+    title: "`def __del__(var self)` hangs the 1.0.0b1 compiler — use `deinit self`"
+    severity: critical
+    mojo_versions: [">=1.0.0b1"]
+    code_pattern: "def\\s+__del__\\s*\\(\\s*var\\s+self"
+    error_pattern: null
+    timeout_pattern: true
+    description: "In Mojo 1.0.0b1, `def __del__(var self):` causes the compiler to hang (observed >90s on a single-field struct) instead of producing a diagnostic. The destructor's self parameter must use the dedicated `deinit` keyword so the compiler can distinguish destruction-time semantics from a normal owning move."
+    fix: "Replace `def __del__(var self):` with `def __del__(deinit self):`. No body changes needed."
+    link: null
+
+  - id: sizeof-renamed
+    title: "`sizeof[T]()` renamed to `size_of[T]()`"
+    severity: warning
+    mojo_versions: [">=1.0.0b1"]
+    code_pattern: "\\bsizeof\\s*\\["
+    error_pattern: "use of unknown declaration 'sizeof'"
+    timeout_pattern: false
+    description: "Since Mojo 1.0.0b1, the compile-time size helper is `size_of[T]()` (snake_case) from `std.sys.info`. The old `sizeof[T]()` produces an undefined-symbol error."
+    fix: "Replace `sizeof[T]()` with `size_of[T]()` and add `from std.sys.info import size_of`."
+    link: null
+
+  - id: mutable-any-origin-renamed
+    title: "`MutableAnyOrigin` renamed to `MutAnyOrigin`"
+    severity: warning
+    mojo_versions: [">=1.0.0b1"]
+    code_pattern: "\\bMutableAnyOrigin\\b"
+    error_pattern: "use of unknown declaration 'MutableAnyOrigin'"
+    timeout_pattern: false
+    description: "Since Mojo 1.0.0b1, `MutableAnyOrigin` is renamed to `MutAnyOrigin` (no 'able'). Used in `ref [...]` annotations and `UnsafePointer[T, MutAnyOrigin]` declarations."
+    fix: "Replace `MutableAnyOrigin` with `MutAnyOrigin`."
+    link: null
+
+  - id: unsafe-pointer-null-sentinel
+    title: "`UnsafePointer[T]()` as null sentinel — wrap in Optional"
+    severity: critical
+    mojo_versions: [">=1.0.0b1"]
+    code_pattern: "UnsafePointer\\[[^\\]]+\\]\\s*\\(\\s*\\)"
+    error_pattern: null
+    timeout_pattern: false
+    description: "Mojo 1.0.0b1 enforces a non-null UnsafePointer policy. Default-constructed `UnsafePointer[T]()` produces a null pointer that segfaults on dereference; the type system no longer treats this as a valid sentinel."
+    fix: "Replace `var ptr = UnsafePointer[T]()` with `var ptr: Optional[UnsafePointer[T, MutAnyOrigin]] = None`. Guard dereferences with `if ptr: ... ptr.value()...`."
+    link: null
+
+  - id: equatable-eq-raises
+    title: "Equatable `__eq__` declared `raises` falls back to reflection auto-derive"
+    severity: warning
+    mojo_versions: [">=1.0.0b1"]
+    code_pattern: "def\\s+__eq__\\s*\\([^)]*\\)\\s+raises\\s*->\\s*Bool"
+    error_pattern: "could not derive Equatable for [^\\n]+member field [^\\n]*does not implement"
+    timeout_pattern: false
+    description: "If `__eq__` is declared `def __eq__(self, other: Self) raises -> Bool`, Mojo 1.0.0b1 silently rejects it as the Equatable conformance and falls back to reflection-based auto-derive. The auto-derive then fails with a misleading 'member field does not implement Equatable' error even when every field is Equatable — because the fallback walks the struct's fields and can fail on Variant arms or wrapper types."
+    fix: "Make `__eq__` non-raising: `def __eq__(self, other: Self) -> Bool`. If equality needs to call raising accessors, add an internal `_unchecked_get(i) -> Value` helper (no bounds check, no raise) and use it in the structural walk."
+    link: null
+
+  - id: writer-bound-without-some
+    title: "`write_to[W: Writer]` — prefer `Some[Writer]` sugar"
+    severity: info
+    mojo_versions: [">=1.0.0b1"]
+    code_pattern: "def\\s+write_to\\s*\\[\\s*W\\s*:\\s*Writer\\s*\\]"
+    error_pattern: null
+    timeout_pattern: false
+    description: "Both forms compile in Mojo 1.0.0b1, but `def write_to(self, mut writer: Some[Writer])` is the preferred existential-trait sugar. Avoids exposing the type parameter in the signature."
+    fix: "Replace `def write_to[W: Writer](self, mut writer: W):` with `def write_to(self, mut writer: Some[Writer]):`."
+    link: null

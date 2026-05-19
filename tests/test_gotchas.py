@@ -12,9 +12,9 @@ class TestLoadGotchas:
         gotchas = load_gotchas()
         assert isinstance(gotchas, list)
 
-    def test_load_has_32_entries(self):
+    def test_load_has_39_entries(self):
         gotchas = load_gotchas()
-        assert len(gotchas) == 32
+        assert len(gotchas) == 39
 
     def test_all_entries_have_required_fields(self):
         gotchas = load_gotchas()
@@ -247,3 +247,96 @@ class TestValidateCodeAuditAdditions:
         issues = validate_code(code, "0.26.2")
         ids = [i["id"] for i in issues]
         assert "unknown-declaration-str" in ids
+
+
+class TestMojo100b1IdiomAudit:
+    """2026-05-19 audit: idioms introduced in Mojo 1.0.0b1."""
+
+    def test_detects_alias_deprecated(self):
+        code = "alias FOO = 42\ndef main():\n    print(FOO)\n"
+        issues = validate_code(code, "1.0.0b1")
+        ids = [i["id"] for i in issues]
+        assert "alias-deprecated" in ids
+
+    def test_alias_deprecated_filtered_out_pre_1_0(self):
+        code = "alias FOO = 42\ndef main():\n    print(FOO)\n"
+        issues = validate_code(code, "0.26.2")
+        ids = [i["id"] for i in issues]
+        assert "alias-deprecated" not in ids
+
+    def test_enriches_alias_deprecated(self):
+        stderr = "warning: 'alias' is deprecated; use 'comptime'\n"
+        hints = enrich_error(stderr, timed_out=False, mojo_version="1.0.0b1")
+        ids = [h["id"] for h in hints]
+        assert "alias-deprecated" in ids
+
+    def test_detects_del_var_self(self):
+        code = "struct Foo:\n    def __del__(var self): pass\ndef main(): pass\n"
+        issues = validate_code(code, "1.0.0b1")
+        ids = [i["id"] for i in issues]
+        assert "del-var-self-hangs" in ids
+
+    def test_del_var_self_fires_on_timeout(self):
+        hints = enrich_error("", timed_out=True, mojo_version="1.0.0b1")
+        ids = [h["id"] for h in hints]
+        assert "del-var-self-hangs" in ids
+
+    def test_detects_sizeof(self):
+        code = "def main():\n    print(sizeof[Int]())\n"
+        issues = validate_code(code, "1.0.0b1")
+        ids = [i["id"] for i in issues]
+        assert "sizeof-renamed" in ids
+
+    def test_enriches_sizeof(self):
+        stderr = "error: use of unknown declaration 'sizeof'\n"
+        hints = enrich_error(stderr, timed_out=False, mojo_version="1.0.0b1")
+        ids = [h["id"] for h in hints]
+        assert "sizeof-renamed" in ids
+
+    def test_detects_mutable_any_origin(self):
+        code = "def main():\n    var p: UnsafePointer[Int, MutableAnyOrigin]\n"
+        issues = validate_code(code, "1.0.0b1")
+        ids = [i["id"] for i in issues]
+        assert "mutable-any-origin-renamed" in ids
+
+    def test_enriches_mutable_any_origin(self):
+        stderr = "error: use of unknown declaration 'MutableAnyOrigin'\n"
+        hints = enrich_error(stderr, timed_out=False, mojo_version="1.0.0b1")
+        ids = [h["id"] for h in hints]
+        assert "mutable-any-origin-renamed" in ids
+
+    def test_detects_unsafe_pointer_null_sentinel(self):
+        code = "def main():\n    var p = UnsafePointer[Int]()\n"
+        issues = validate_code(code, "1.0.0b1")
+        ids = [i["id"] for i in issues]
+        assert "unsafe-pointer-null-sentinel" in ids
+
+    def test_detects_equatable_eq_raises(self):
+        code = (
+            "struct S(Equatable, Copyable):\n"
+            "    def __eq__(self, other: Self) raises -> Bool:\n"
+            "        return True\n"
+            "def main(): pass\n"
+        )
+        issues = validate_code(code, "1.0.0b1")
+        ids = [i["id"] for i in issues]
+        assert "equatable-eq-raises" in ids
+
+    def test_enriches_equatable_eq_raises(self):
+        stderr = (
+            "error: could not derive Equatable for Wrapper — "
+            "member field 'storage' does not implement Equatable\n"
+        )
+        hints = enrich_error(stderr, timed_out=False, mojo_version="1.0.0b1")
+        ids = [h["id"] for h in hints]
+        assert "equatable-eq-raises" in ids
+
+    def test_detects_writer_bound_without_some(self):
+        code = (
+            "struct S:\n"
+            "    def write_to[W: Writer](self, mut writer: W): pass\n"
+            "def main(): pass\n"
+        )
+        issues = validate_code(code, "1.0.0b1")
+        ids = [i["id"] for i in issues]
+        assert "writer-bound-without-some" in ids
