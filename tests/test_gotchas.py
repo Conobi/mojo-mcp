@@ -12,9 +12,9 @@ class TestLoadGotchas:
         gotchas = load_gotchas()
         assert isinstance(gotchas, list)
 
-    def test_load_has_39_entries(self):
+    def test_load_has_49_entries(self):
         gotchas = load_gotchas()
-        assert len(gotchas) == 39
+        assert len(gotchas) == 49
 
     def test_all_entries_have_required_fields(self):
         gotchas = load_gotchas()
@@ -340,3 +340,69 @@ class TestMojo100b1IdiomAudit:
         issues = validate_code(code, "1.0.0b1")
         ids = [i["id"] for i in issues]
         assert "writer-bound-without-some" in ids
+
+
+class TestSecurityRules:
+    """Security rules adapted from the ANSSI secure Mojo guide."""
+
+    def test_detects_forget_deinit(self):
+        code = "from std.memory import forget_deinit\ndef main():\n    forget_deinit(x^)\n"
+        issues = validate_code(code, "0.26.2")
+        ids = [i["id"] for i in issues]
+        assert "sec-forget-deinit" in ids
+
+    def test_detects_abort(self):
+        code = "def handle_error():\n    abort()\n"
+        issues = validate_code(code, "0.26.2")
+        ids = [i["id"] for i in issues]
+        assert "sec-abort-in-library" in ids
+
+    def test_detects_memset_zero(self):
+        code = "def clear():\n    memset_zero(ptr, 64)\n"
+        issues = validate_code(code, "0.26.2")
+        ids = [i["id"] for i in issues]
+        assert "sec-memset-zero-sensitive" in ids
+
+    def test_detects_unsafe_pointer(self):
+        code = "def main():\n    var p = UnsafePointer[Int, MutAnyOrigin]\n"
+        issues = validate_code(code, "0.26.2")
+        ids = [i["id"] for i in issues]
+        assert "sec-unsafe-pointer-app-code" in ids
+
+    def test_detects_unsafe_union(self):
+        code = "def main():\n    var u = UnsafeUnion[Int32, Float32]()\n"
+        issues = validate_code(code, "0.26.2")
+        ids = [i["id"] for i in issues]
+        assert "sec-unsafe-union" in ids
+
+    def test_detects_unsafe_maybe_uninit(self):
+        code = "def main():\n    var m = UnsafeMaybeUninit[Int]()\n"
+        issues = validate_code(code, "0.26.2")
+        ids = [i["id"] for i in issues]
+        assert "sec-unsafe-maybe-uninit" in ids
+
+    def test_detects_implicit_copy_sensitive(self):
+        code = "struct SecretKey(ImplicitlyCopyable):\n    var data: List[UInt8]\n"
+        issues = validate_code(code, "0.26.2")
+        ids = [i["id"] for i in issues]
+        assert "sec-implicit-copy-sensitive" in ids
+
+    def test_security_issues_have_category(self):
+        code = "def main():\n    forget_deinit(x^)\n"
+        issues = validate_code(code, "0.26.2")
+        sec = [i for i in issues if i.get("category") == "security"]
+        assert len(sec) > 0
+
+    def test_category_filter_returns_only_security(self):
+        code = "var x = 1\ndef main():\n    forget_deinit(x^)\n"
+        all_issues = validate_code(code, "0.26.2")
+        sec_issues = validate_code(code, "0.26.2", category="security")
+        assert len(sec_issues) < len(all_issues)
+        for issue in sec_issues:
+            assert issue.get("category") == "security"
+
+    def test_category_filter_none_returns_all(self):
+        code = "var x = 1\ndef main():\n    forget_deinit(x^)\n"
+        all_issues = validate_code(code, "0.26.2", category=None)
+        assert any(i.get("category") == "security" for i in all_issues)
+        assert any(i.get("category") is None for i in all_issues)

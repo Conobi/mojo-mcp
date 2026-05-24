@@ -104,7 +104,7 @@ gotchas:
     title: "For loop variable is a reference, not a copy"
     severity: warning
     mojo_versions: [">=0.26.0"]
-    code_pattern: "for\\s+\\w+\\s+in\\s+"
+    code_pattern: "for\\s+\\w+\\s+in\\s+(?!range\\s*\\()"
     error_pattern: null
     timeout_pattern: false
     description: "In Mojo, `for x in collection` binds x as a reference. Modifying the collection during iteration is undefined behavior."
@@ -434,4 +434,129 @@ gotchas:
     timeout_pattern: false
     description: "Both forms compile in Mojo 1.0.0b1, but `def write_to(self, mut writer: Some[Writer])` is the preferred existential-trait sugar. Avoids exposing the type parameter in the signature."
     fix: "Replace `def write_to[W: Writer](self, mut writer: W):` with `def write_to(self, mut writer: Some[Writer]):`."
+    link: null
+
+  # -- Security rules (adapted from ANSSI secure Mojo guide) --
+  # Category: security — these patterns detect violations of secure
+  # development practices per the "Programming Rules to Develop Secure
+  # Applications with Mojo" guide.
+
+  - id: sec-forget-deinit
+    title: "Use of forget_deinit (M15)"
+    severity: critical
+    category: security
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "\\bforget_deinit\\s*\\("
+    error_pattern: null
+    timeout_pattern: false
+    description: "forget_deinit skips destructors, which may leak critical resources or leave sensitive data in memory. Prohibited by secure development rule M15."
+    fix: "Remove forget_deinit. Let values go out of scope naturally, or use @explicit_destroy for controlled consumption."
+    link: null
+
+  - id: sec-abort-in-library
+    title: "abort() used outside main entry point (M13)"
+    severity: warning
+    category: security
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "\\babort\\s*\\("
+    error_pattern: null
+    timeout_pattern: false
+    description: "abort() terminates the process with no cleanup. Library code should use `raises` for recoverable errors. Prohibited in library code by rule M13."
+    fix: "Replace abort() with `raise Error(...)`. Reserve abort() for truly unrecoverable states in application entry points only."
+    link: null
+
+  - id: sec-memset-zero-sensitive
+    title: "memset_zero used for sensitive data (M20)"
+    severity: warning
+    category: security
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "\\bmemset_zero\\s*\\("
+    error_pattern: null
+    timeout_pattern: false
+    description: "memset_zero may be optimized away by dead-store elimination. For sensitive data (keys, passwords, tokens), use volatile stores instead. Rule M20."
+    fix: "Replace with a byte-wise volatile-store loop: `ptr.store[volatile=True](i, UInt8(0))`. See the secure zeroing pattern in the Mojo security guide."
+    link: null
+
+  - id: sec-unsafe-pointer-app-code
+    title: "UnsafePointer in application code (M9)"
+    severity: warning
+    category: security
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "\\bUnsafePointer\\["
+    error_pattern: null
+    timeout_pattern: false
+    description: "UnsafePointer should be confined to FFI boundary modules and low-level infrastructure. Application code should use OwnedPointer, ArcPointer, or Span instead. Rule M9."
+    fix: "Replace with OwnedPointer (single owner), ArcPointer (shared), Pointer/Span (borrowing). Confine UnsafePointer to dedicated FFI/infrastructure modules."
+    link: null
+
+  - id: sec-unsafe-union
+    title: "UnsafeUnion usage requires careful validation (M9/M30)"
+    severity: warning
+    category: security
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "\\bUnsafeUnion\\["
+    error_pattern: null
+    timeout_pattern: false
+    description: "UnsafeUnion provides untagged C union semantics. Reading the wrong variant is undefined behavior. Must be confined to FFI modules and validated carefully. Rules M9, M30."
+    fix: "Only access the variant that was last written. Validate discriminant values from foreign code. Document the safety invariants."
+    link: null
+
+  - id: sec-unsafe-maybe-uninit
+    title: "UnsafeMaybeUninit usage (M19)"
+    severity: warning
+    category: security
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "\\bUnsafeMaybeUninit\\["
+    error_pattern: null
+    timeout_pattern: false
+    description: "UnsafeMaybeUninit wraps potentially uninitialized memory. Its destructor is a no-op — initialized values will not be cleaned up. Must be explicitly justified. Rule M19."
+    fix: "Avoid UnsafeMaybeUninit unless explicitly justified. Track initialization state manually and call unsafe_assume_init_destroy() on initialized values."
+    link: null
+
+  - id: sec-export-missing-try
+    title: "@export function without try/except (M44)"
+    severity: critical
+    category: security
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "@export\\s*\\([^)]*\\)\\s*\\ndef\\s+\\w+\\s*\\([^)]*\\)\\s*(?:raises\\s+)?->"
+    error_pattern: null
+    timeout_pattern: false
+    description: "Functions exported via @export with ABI=\"C\" must catch all exceptions internally. Unhandled exceptions across FFI boundaries result in undefined behavior. Rule M44."
+    fix: "Wrap the function body in try/except, convert exceptions to C-compatible error return codes. Never let `raises` propagate from an @export function."
+    link: null
+
+  - id: sec-safe-ref-at-ffi
+    title: "Safe Pointer/ref used at FFI boundary (M34)"
+    severity: warning
+    category: security
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "@export\\s*\\([^)]*\\)[\\s\\S]*?\\bPointer\\["
+    error_pattern: null
+    timeout_pattern: false
+    description: "Safe Pointer types with origin tracking should not be used at FFI boundaries. Foreign code cannot satisfy Mojo's reference validity requirements. Use UnsafePointer instead. Rule M34."
+    fix: "Replace Pointer[T] with UnsafePointer[T, MutAnyOrigin] in @export function signatures."
+    link: null
+
+  - id: sec-ffi-fn-pointer-no-abi
+    title: "Function pointer at FFI boundary without abi(\"C\") (M36)"
+    severity: warning
+    category: security
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "@export[\\s\\S]*?def\\s+\\w+\\s*\\([^)]*\\bdef\\s*\\([^)]*\\)(?!.*\\babi\\s*\\()"
+    error_pattern: null
+    timeout_pattern: false
+    description: "Function pointer parameters in @export functions must use `thin abi(\"C\")` to ensure C calling convention compatibility. Rule M36."
+    fix: "Mark function pointer types as `def(...) thin abi(\"C\") -> RetType`."
+    link: null
+
+  - id: sec-implicit-copy-sensitive
+    title: "ImplicitlyCopyable on potentially sensitive type (M29)"
+    severity: info
+    category: security
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "struct\\s+\\w*(?:Key|Secret|Token|Password|Credential|Private)\\w*\\s*\\([^)]*ImplicitlyCopyable"
+    error_pattern: null
+    timeout_pattern: false
+    description: "Types wrapping sensitive data (keys, secrets, tokens) should not be ImplicitlyCopyable. Accidental copies leave sensitive data in multiple memory locations. Rule M29."
+    fix: "Remove ImplicitlyCopyable. Use Copyable (requires explicit .copy() call) or make the type Movable only."
     link: null

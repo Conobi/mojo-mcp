@@ -97,6 +97,7 @@ def _render_search(r: dict) -> str:
 
 
 _SEVERITY_GLYPH = {"critical": "⛔", "warning": "⚠️", "info": "ℹ️"}
+_CATEGORY_TAG = {"security": "🔒"}
 
 
 @_register("validate")
@@ -117,7 +118,10 @@ def _render_validate(r: dict) -> str:
             iid = issue.get("id", "?")
             desc = issue.get("description", "")
             fix = issue.get("fix", "")
-            parts.append(f"- {glyph} **[{sev}] {iid}** — {title}")
+            cat = issue.get("category", "")
+            cat_tag = _CATEGORY_TAG.get(cat, "")
+            prefix = f"{cat_tag} " if cat_tag else ""
+            parts.append(f"- {glyph} {prefix}**[{sev}] {iid}** — {title}")
             if desc:
                 parts.append(f"  {desc}")
             if fix:

@@ -56,14 +56,18 @@ def _version_matches(mojo_version: str, ranges: list[str]) -> bool:
 
 def _gotcha_to_hint(g: dict) -> dict:
     """Extract the user-facing hint fields from a gotcha entry."""
-    return {
+    hint: dict = {
         "id": g["id"],
         "title": g["title"],
         "severity": g["severity"],
         "description": g["description"],
         "fix": g["fix"],
-        "link": g.get("link"),
     }
+    if g.get("category"):
+        hint["category"] = g["category"]
+    if g.get("link"):
+        hint["link"] = g["link"]
+    return hint
 
 
 @lru_cache(maxsize=1)
@@ -75,18 +79,25 @@ def load_gotchas() -> list[dict]:
     return data.get("gotchas", [])
 
 
-def validate_code(source: str, mojo_version: str) -> list[dict]:
+def validate_code(
+    source: str,
+    mojo_version: str,
+    category: str | None = None,
+) -> list[dict]:
     """Run code_pattern regexes against source code.
 
     Returns a list of matched gotcha hints for patterns that:
     - have a code_pattern
     - match the given mojo_version
     - match the source code
+    - (optionally) belong to the specified category
     """
     gotchas = load_gotchas()
     hits: list[dict] = []
     for g in gotchas:
         if not g.get("code_pattern"):
+            continue
+        if category is not None and g.get("category") != category:
             continue
         if not _version_matches(mojo_version, g.get("mojo_versions", [])):
             continue

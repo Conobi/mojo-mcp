@@ -350,10 +350,13 @@ CHANGELOG_TOOL = types.Tool(
 VALIDATE_TOOL = types.Tool(
     name="validate",
     description=(
-        "Validate Mojo source code against known gotcha patterns before compilation. "
+        "Validate Mojo source code against known gotcha and security patterns before compilation. "
         "Checks for common pitfalls: Variant in loops (compile hang), module-level vars, "
         "deprecated APIs, missing initializers, and more. "
+        "Also checks for security issues: forget_deinit usage, unsafe types in application code, "
+        "non-volatile zeroing of sensitive data, missing try/except in @export functions. "
         "Pass `code` for in-memory validation or `path` to check a file on disk. "
+        "Use `category: \"security\"` to run only security checks. "
         "Returns a list of issues with severity, description, and fix suggestions."
     ),
     inputSchema={
@@ -370,6 +373,10 @@ VALIDATE_TOOL = types.Tool(
             "mojo_version": {
                 "type": "string",
                 "description": "Mojo version for filtering patterns (e.g. '0.26.2'). Auto-detected if omitted.",
+            },
+            "category": {
+                "type": "string",
+                "description": "Filter patterns by category. Use 'security' for security-only checks. Omit for all patterns.",
             },
             "format": _FORMAT_PROP,
         },
@@ -522,6 +529,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         raw = await loop.run_in_executor(
             None, run_validate,
             arguments.get("code"), arguments.get("path"), arguments.get("mojo_version"),
+            arguments.get("category"),
         )
         result_dict = _to_dict(raw)
 

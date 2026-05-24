@@ -640,6 +640,7 @@ def run_validate(
     code: str | None = None,
     path: str | None = None,
     mojo_version: str | None = None,
+    category: str | None = None,
 ) -> str:
     """Validate Mojo source code against known gotcha patterns.
 
@@ -647,13 +648,14 @@ def run_validate(
         code:         Mojo source code string. Takes precedence over path.
         path:         Path to a .mojo file to validate.
         mojo_version: Mojo version for filtering. Defaults to global version.
+        category:     Filter by pattern category (e.g. "security"). None = all.
     """
     from .gotchas import validate_code
 
     if code is None and path is None:
         return _json({
             "error": "Either 'code' or 'path' must be provided.",
-            "hint": "validate(code='fn main(): ...') or validate(path='/path/to/file.mojo')",
+            "hint": "validate(code='def main(): ...') or validate(path='/path/to/file.mojo')",
         })
 
     if code is None:
@@ -683,11 +685,14 @@ def run_validate(
         except Exception:
             mojo_version = "0.26.0"
 
-    issues = validate_code(code, mojo_version)
+    issues = validate_code(code, mojo_version, category=category)
     output: dict[str, Any] = {"issues": issues, "count": len(issues)}
+    if category:
+        output["category"] = category
     if issues:
         output["hint"] = "Fix the issues above, then use execute(code=...) to test."
     else:
-        output["message"] = "No known gotcha patterns matched."
+        label = f"{category} " if category else ""
+        output["message"] = f"No {label}patterns matched."
         output["hint"] = "Code looks clean. Use execute(code=...) to run it."
     return _json(output)
