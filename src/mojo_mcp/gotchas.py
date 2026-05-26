@@ -9,6 +9,25 @@ import yaml
 
 _NUMERIC_PREFIX_RE = re.compile(r"^(\d+)")
 
+_STRING_OR_COMMENT_RE = re.compile(
+    r'"""[\s\S]*?"""|'
+    r"'''[\s\S]*?'''|"
+    r'"(?:[^"\\]|\\.)*"|'
+    r"'(?:[^'\\]|\\.)*'|"
+    r"#[^\n]*"
+)
+
+
+def _strip_comments_and_strings(source: str) -> str:
+    """Remove string literals and comments to prevent false-positive pattern matches.
+
+    Handles triple-quoted docstrings, single/double-quoted strings (with escapes),
+    and ``#`` line comments. Matched spans are replaced with the empty string so that
+    prose inside docstrings (e.g. ``"An owned handle"``) no longer triggers
+    code-pattern regexes.
+    """
+    return _STRING_OR_COMMENT_RE.sub("", source)
+
 
 def _parse_version(v: str) -> tuple[int, ...]:
     """Parse '0.26.2', '26.2', or '1.0.0b1' into a comparable tuple.
@@ -83,16 +102,19 @@ def validate_code(
     source: str,
     mojo_version: str,
     category: str | None = None,
+    path: str | None = None,
 ) -> list[dict]:
     """Run code_pattern regexes against source code.
 
     Returns a list of matched gotcha hints for patterns that:
     - have a code_pattern
     - match the given mojo_version
-    - match the source code
+    - match the source code (after stripping comments/strings)
     - (optionally) belong to the specified category
+    - are not excluded by path_exclude when a path is given
     """
     gotchas = load_gotchas()
+    stripped = _strip_comments_and_strings(source)
     hits: list[dict] = []
     for g in gotchas:
         if not g.get("code_pattern"):
@@ -101,7 +123,10 @@ def validate_code(
             continue
         if not _version_matches(mojo_version, g.get("mojo_versions", [])):
             continue
-        if re.search(g["code_pattern"], source, re.MULTILINE):
+        if path and g.get("path_exclude"):
+            if re.search(g["path_exclude"], path):
+                continue
+        if re.search(g["code_pattern"], stripped, re.MULTILINE):
             hits.append(_gotcha_to_hint(g))
     return hits
 

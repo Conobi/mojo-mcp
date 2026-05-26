@@ -4,7 +4,13 @@ import re
 
 import pytest
 
-from mojo_mcp.gotchas import _parse_version, enrich_error, load_gotchas, validate_code
+from mojo_mcp.gotchas import (
+    _parse_version,
+    _strip_comments_and_strings,
+    enrich_error,
+    load_gotchas,
+    validate_code,
+)
 
 
 class TestLoadGotchas:
@@ -406,3 +412,89 @@ class TestSecurityRules:
         all_issues = validate_code(code, "0.26.2", category=None)
         assert any(i.get("category") == "security" for i in all_issues)
         assert any(i.get("category") is None for i in all_issues)
+
+
+class TestStripCommentsAndStrings:
+    """Verify that comment/string stripping prevents false-positive matches."""
+
+    def test_strips_triple_double_quoted_docstrings(self):
+        source = '"""An owned I/O resource handle."""\ndef main(): pass\n'
+        stripped = _strip_comments_and_strings(source)
+        assert "owned" not in stripped
+
+    def test_strips_triple_single_quoted_docstrings(self):
+        source = "'''An owned I/O resource handle.'''\ndef main(): pass\n"
+        stripped = _strip_comments_and_strings(source)
+        assert "owned" not in stripped
+
+    def test_strips_single_line_strings(self):
+        source = 'var x = "owned data"\ndef main(): pass\n'
+        stripped = _strip_comments_and_strings(source)
+        assert "owned data" not in stripped
+
+    def test_strips_comments(self):
+        source = "# owned resources need cleanup\ndef main(): pass\n"
+        stripped = _strip_comments_and_strings(source)
+        assert "owned" not in stripped
+
+    def test_preserves_code(self):
+        source = "def main():\n    var x = 42\n"
+        stripped = _strip_comments_and_strings(source)
+        assert "def main" in stripped
+        assert "var x = 42" in stripped
+
+    def test_hash_inside_string_not_treated_as_comment(self):
+        source = 'var x = "foo#bar"\nvar y = 10\n'
+        stripped = _strip_comments_and_strings(source)
+        assert "var y = 10" in stripped
+
+    def test_escaped_quotes_handled(self):
+        source = 'var x = "say \\"hello\\""\nowned param: Int\n'
+        stripped = _strip_comments_and_strings(source)
+        assert "owned param: Int" in stripped
+
+
+class TestFalsePositivePrevention:
+    """Each test validates that a previously-identified false positive no longer fires."""
+
+    def test_owned_in_docstring_not_flagged(self):
+        code = '"""An owned I/O resource handle with RAII semantics."""\ndef main(): pass\n'
+        issues = validate_code(code, "0.26.2")
+        ids = [i["id"] for i in issues]
+        assert "owned-keyword-removed" not in ids
+
+    def test_owned_in_parameter_position_still_flagged(self):
+        code = "def foo(owned x: Int):\n    pass\n"
+        issues = validate_code(code, "0.26.2")
+        ids = [i["id"] for i in issues]
+        assert "owned-keyword-removed" in ids
+
+    def test_string_indexing_not_flagged_on_code_scan(self):
+        code = "def main():\n    var arr = InlineArray[UInt8, 4](fill=0)\n    var x = arr[0]\n"
+        issues = validate_code(code, "0.26.2")
+        ids = [i["id"] for i in issues]
+        assert "string-indexing" not in ids
+
+    def test_inline_array_fill_not_flagged(self):
+        code = "def main():\n    var arr = InlineArray[UInt8, 4](fill=0)\n"
+        issues = validate_code(code, "0.26.2")
+        ids = [i["id"] for i in issues]
+        assert "inline-array-init" not in ids
+
+    def test_list_kwargs_not_flagged(self):
+        code = "def main():\n    var x = List[Int](size=5, data=ptr)\n"
+        issues = validate_code(code, "0.26.2")
+        ids = [i["id"] for i in issues]
+        assert "list-variadic-construction" not in ids
+
+    def test_list_variadic_still_flagged(self):
+        code = "def main():\n    var x = List[Int](1, 2, 3)\n"
+        issues = validate_code(code, "0.26.2")
+        ids = [i["id"] for i in issues]
+        assert "list-variadic-construction" in ids
+
+    def test_unsafe_pointer_always_flagged(self):
+        code = "def main():\n    var p = UnsafePointer[Int, MutAnyOrigin]\n"
+        issues = validate_code(code, "0.26.2")
+        ids = [i["id"] for i in issues]
+        assert "sec-unsafe-pointer-app-code" in ids

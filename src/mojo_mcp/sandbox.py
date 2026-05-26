@@ -636,6 +636,35 @@ def run_install_mojo(version: str | None = None, project_path: str | None = None
 # Validate
 # ---------------------------------------------------------------------------
 
+def _detect_mojo_version() -> str:
+    """Auto-detect installed Mojo version, falling back to '0.26.0'."""
+    try:
+        proc = subprocess.run(
+            ["mojo", "--version"], capture_output=True, text=True, timeout=5
+        )
+        version_str = proc.stdout.strip().split()[1] if proc.stdout.strip() else "0.26.0"
+        parts = version_str.split(".")
+        return ".".join(parts[:3])
+    except Exception:
+        return "0.26.0"
+
+
+def _validate_single_file(
+    file_path: Path,
+    mojo_version: str,
+    category: str | None,
+) -> dict[str, Any]:
+    """Validate one .mojo file and return its result dict."""
+    from .gotchas import validate_code
+
+    code = file_path.read_text(encoding="utf-8", errors="replace")
+    issues = validate_code(code, mojo_version, category=category, path=str(file_path))
+    result: dict[str, Any] = {"path": str(file_path), "issues": issues, "count": len(issues)}
+    if category:
+        result["category"] = category
+    return result
+
+
 def run_validate(
     code: str | None = None,
     path: str | None = None,
@@ -646,7 +675,8 @@ def run_validate(
 
     Args:
         code:         Mojo source code string. Takes precedence over path.
-        path:         Path to a .mojo file to validate.
+        path:         Path to a .mojo file or directory to validate.
+                      Directories are scanned recursively for .mojo files.
         mojo_version: Mojo version for filtering. Defaults to global version.
         category:     Filter by pattern category (e.g. "security"). None = all.
     """
@@ -658,35 +688,62 @@ def run_validate(
             "hint": "validate(code='def main(): ...') or validate(path='/path/to/file.mojo')",
         })
 
-    if code is None:
-        try:
-            assert path is not None  # guarded by check above
-            p = Path(path).resolve()
-            if not p.is_file():
+    if mojo_version is None:
+        mojo_version = _detect_mojo_version()
+
+    # --- Directory mode: recursive scan ---
+    if code is None and path is not None:
+        p = Path(path).resolve()
+
+        if p.is_dir():
+            mojo_files = sorted(p.rglob("*.mojo"))
+            if not mojo_files:
                 return _json({
-                    "error": f"Not a file: {path}",
-                    "hint": "validate(code='fn main(): ...') or validate(path='/path/to/file.mojo')",
+                    "error": f"No .mojo files found in {path}",
+                    "hint": "validate(path='/path/to/project/') — directory must contain .mojo files.",
                 })
+
+            files_with_issues: list[dict[str, Any]] = []
+            total_issues = 0
+            for mf in mojo_files:
+                try:
+                    result = _validate_single_file(mf, mojo_version, category)
+                except Exception as e:
+                    result = {"path": str(mf), "issues": [], "count": 0, "error": str(e)}
+                if result["count"] > 0 or "error" in result:
+                    files_with_issues.append(result)
+                    total_issues += result["count"]
+
+            output: dict[str, Any] = {
+                "files_scanned": len(mojo_files),
+                "files_with_issues": len(files_with_issues),
+                "total_issues": total_issues,
+                "results": files_with_issues,
+            }
+            if category:
+                output["category"] = category
+            if not files_with_issues:
+                label = f"{category} " if category else ""
+                output["message"] = f"All {len(mojo_files)} files clean — no {label}patterns matched."
+            return _json(output)
+
+        # --- Single file mode ---
+        if not p.is_file():
+            return _json({
+                "error": f"Not a file or directory: {path}",
+                "hint": "validate(path='/path/to/file.mojo') or validate(path='/path/to/dir/')",
+            })
+        try:
             code = p.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
             return _json({
                 "error": str(e),
-                "hint": "validate(code='fn main(): ...') or validate(path='/path/to/file.mojo')",
+                "hint": "validate(code='def main(): ...') or validate(path='/path/to/file.mojo')",
             })
 
-    if mojo_version is None:
-        try:
-            proc = subprocess.run(
-                ["mojo", "--version"], capture_output=True, text=True, timeout=5
-            )
-            version_str = proc.stdout.strip().split()[1] if proc.stdout.strip() else "0.26.0"
-            parts = version_str.split(".")
-            mojo_version = ".".join(parts[:3])
-        except Exception:
-            mojo_version = "0.26.0"
-
-    issues = validate_code(code, mojo_version, category=category)
-    output: dict[str, Any] = {"issues": issues, "count": len(issues)}
+    assert code is not None  # guaranteed by early returns above
+    issues = validate_code(code, mojo_version, category=category, path=path)
+    output = {"issues": issues, "count": len(issues)}
     if category:
         output["category"] = category
     if issues:

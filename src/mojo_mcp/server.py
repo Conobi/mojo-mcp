@@ -355,7 +355,8 @@ VALIDATE_TOOL = types.Tool(
         "deprecated APIs, missing initializers, and more. "
         "Also checks for security issues: forget_deinit usage, unsafe types in application code, "
         "non-volatile zeroing of sensitive data, missing try/except in @export functions. "
-        "Pass `code` for in-memory validation or `path` to check a file on disk. "
+        "Pass `code` for in-memory validation, `path` to check a file, or `path` to a directory "
+        "to recursively scan all .mojo files (only files with issues are returned). "
         "Use `category: \"security\"` to run only security checks. "
         "Returns a list of issues with severity, description, and fix suggestions."
     ),
@@ -368,7 +369,7 @@ VALIDATE_TOOL = types.Tool(
             },
             "path": {
                 "type": "string",
-                "description": "Path to a .mojo file to validate. Ignored if code is provided.",
+                "description": "Path to a .mojo file or directory to validate. Directories are scanned recursively for .mojo files. Ignored if code is provided.",
             },
             "mojo_version": {
                 "type": "string",

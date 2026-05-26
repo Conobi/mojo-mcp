@@ -27,7 +27,7 @@ gotchas:
     title: "String indexing unsupported"
     severity: warning
     mojo_versions: [">=0.26.0"]
-    code_pattern: "\\w+\\[\\d+\\]"
+    code_pattern: null
     error_pattern: "does not implement .+__getitem__"
     timeout_pattern: false
     description: "String indexing with [] is not supported in Mojo. Use .as_bytes() to access individual characters."
@@ -49,7 +49,7 @@ gotchas:
     title: "InlineArray requires all N slots initialized"
     severity: warning
     mojo_versions: [">=0.26.0"]
-    code_pattern: "InlineArray\\["
+    code_pattern: null
     error_pattern: "must be initialized"
     timeout_pattern: false
     description: "InlineArray[T, N] requires all N slots to be initialized at construction. Partial initialization is not allowed."
@@ -137,7 +137,7 @@ gotchas:
     title: "'owned' keyword has been removed"
     severity: warning
     mojo_versions: [">=0.26.2"]
-    code_pattern: "\\bowned\\s+\\w+"
+    code_pattern: "\\bowned\\s+\\w+\\s*:"
     error_pattern: "owned"
     timeout_pattern: false
     description: "The `owned` keyword has been removed in Mojo 0.26.2. Use `var` for parameters or `deinit` for __moveinit__/__del__ arguments."
@@ -214,7 +214,7 @@ gotchas:
     title: "List variadic construction does not work"
     severity: warning
     mojo_versions: [">=0.26.2"]
-    code_pattern: "List\\[.+\\]\\(.+,.+\\)"
+    code_pattern: "List\\[[^\\]]+\\]\\([^)=]*,[^)=]*\\)"
     error_pattern: null
     timeout_pattern: false
     description: "List[T](val1, val2, val3) variadic construction does not compile in Mojo 0.26.2. There is no variadic initializer for List."
