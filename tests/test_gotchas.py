@@ -18,9 +18,9 @@ class TestLoadGotchas:
         gotchas = load_gotchas()
         assert isinstance(gotchas, list)
 
-    def test_load_has_49_entries(self):
+    def test_load_has_50_entries(self):
         gotchas = load_gotchas()
-        assert len(gotchas) == 49
+        assert len(gotchas) == 50
 
     def test_all_entries_have_required_fields(self):
         gotchas = load_gotchas()
@@ -336,6 +336,28 @@ class TestMojo100b1IdiomAudit:
         hints = enrich_error(stderr, timed_out=False, mojo_version="1.0.0b1")
         ids = [h["id"] for h in hints]
         assert "equatable-eq-raises" in ids
+
+    def test_detects_raw_pointer_struct_field_miscompile(self):
+        # A raw UnsafePointer stored as a struct field is the risky shape.
+        code = (
+            "struct Document:\n"
+            "    var _tape: UnsafePointer[Tape]\n"
+            "def main(): pass\n"
+        )
+        issues = validate_code(code, "1.0.0b1")
+        ids = [i["id"] for i in issues]
+        assert "raw-pointer-struct-field-miscompile" in ids
+
+    def test_raw_pointer_struct_field_with_origin_not_flagged(self):
+        # The origin-parameterized safe Pointer[T, o] workaround must NOT trigger.
+        code = (
+            "struct Document[o: MutOrigin]:\n"
+            "    var _tape: Pointer[Tape, Self.o]\n"
+            "def main(): pass\n"
+        )
+        issues = validate_code(code, "1.0.0b1")
+        ids = [i["id"] for i in issues]
+        assert "raw-pointer-struct-field-miscompile" not in ids
 
     def test_detects_writer_bound_without_some(self):
         code = (

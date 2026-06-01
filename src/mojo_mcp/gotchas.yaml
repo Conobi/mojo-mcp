@@ -414,6 +414,17 @@ gotchas:
     fix: "Replace `var ptr = UnsafePointer[T]()` with `var ptr: Optional[UnsafePointer[T, MutAnyOrigin]] = None`. Guard dereferences with `if ptr: ... ptr.value()...`."
     link: null
 
+  - id: raw-pointer-struct-field-miscompile
+    title: "Raw UnsafePointer stored in a struct field silently miscompiles collection reads"
+    severity: critical
+    mojo_versions: [">=0.26.0"]
+    code_pattern: "var\\s+\\w+\\s*:\\s*UnsafePointer\\["
+    error_pattern: null
+    timeout_pattern: false
+    description: "Storing a raw `UnsafePointer[T]` (where T owns a List or other collection) in a STRUCT FIELD that captures the address of a stack-local, then reading the collection's DATA back through that field inside a NON-inlined function/method, silently returns garbage (zeroes / stale memory). No diagnostic is emitted — the program compiles and runs but produces wrong values. This is a provenance / escape-analysis miscompile: the address-of escape laundered through the raw-pointer field is lost across the non-inlined call, so the optimizer reuses or registerizes the local's slot. The List HEADER (len) may read correctly while the DATA reads garbage. Inlining the reader (small accessor) or heap-allocating the pointee hides the bug. Confirmed on Mojo 0.26.3.0.dev2026042005 (1.0.0b1 line) and deterministic. Because the failure is SILENT, this regex only heuristically flags the risky shape (any UnsafePointer struct field) — review the access pattern manually."
+    fix: "Parameterize the holder over an origin and use a safe, origin-tracked `Pointer[T, o]` field (e.g. `struct View[o: MutOrigin]: var p: Pointer[T, Self.o]` with a factory returning `View[origin_of(x)]`) instead of a raw `UnsafePointer` field. The origin keeps the pointee provably live/escaped and the read is correct across non-inlined boundaries. Heap-allocating the pointee (`alloc[T](1)` + `init_pointee_move`) also avoids the defect."
+    link: null
+
   - id: equatable-eq-raises
     title: "Equatable `__eq__` declared `raises` falls back to reflection auto-derive"
     severity: warning
