@@ -135,6 +135,17 @@ EXECUTE_TOOL = types.Tool(
                 "type": "integer",
                 "description": "Process timeout in seconds (default 30).",
             },
+            "raw": {
+                "type": "boolean",
+                "description": (
+                    "Escape hatch. When true, return ungrouped, un-deduplicated "
+                    "diagnostics (one entry per diagnostic) and skip cross-rebuild "
+                    "suppression. Default false: diagnostics are compacted "
+                    "(identical-class collapsed with counts + line ranges, errors "
+                    "first) and dependency warnings already shown this session are "
+                    "replaced by a one-line marker."
+                ),
+            },
             "format": _FORMAT_PROP,
         },
         "required": [],
@@ -406,15 +417,36 @@ async def list_tools() -> list[types.Tool]:
 
 
 @app.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+def _tool_result(
+    result_dict: dict, fmt: str, tool: str, *, is_error: bool | None = None
+) -> types.CallToolResult:
+    """Render a tool result and flag execution failures via ``isError``.
+
+    Per the MCP spec, tool *execution* errors are returned as a normal result
+    with ``isError=True`` (so the model sees and can recover from them) rather
+    than as protocol-level errors. When ``is_error`` is None it is inferred:
+    the result carries an ``"error"`` key, or a non-zero process ``returncode``.
+    """
+    if is_error is None:
+        is_error = ("error" in result_dict) or (
+            result_dict.get("returncode", 0) not in (0, None)
+        )
+    text = render(result_dict, fmt, tool=tool)
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=text)],
+        isError=is_error,
+    )
+
+
+async def call_tool(name: str, arguments: dict) -> types.CallToolResult:
     loop = asyncio.get_event_loop()
     fmt = arguments.get("format", "md")
     if fmt not in ("md", "json"):
-        return [types.TextContent(type="text", text=render(
+        return _tool_result(
             {"error": f"Invalid format {fmt!r}. Use 'md' or 'json'.",
              "hint": "Omit `format` to default to markdown."},
-            "md", tool="search",
-        ))]
+            "md", "search",
+        )
 
     if name == "search":
         raw = await loop.run_in_executor(None, run_search, arguments.get("code", ""), _docs)
@@ -429,13 +461,13 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 "error": "Provide either 'code' or 'path', not both.",
                 "hint": "Use 'code' for inline snippets; 'path' for files on disk.",
             }
-            return [types.TextContent(type="text", text=render(result_dict, fmt, tool=name))]
+            return _tool_result(result_dict, fmt, name)
         if not code and not path:
             result_dict = {
                 "error": "Provide 'code' (inline source) or 'path' (file to read).",
                 "hint": "execute(code='def main(): print(42)') or execute(path='./main.mojo').",
             }
-            return [types.TextContent(type="text", text=render(result_dict, fmt, tool=name))]
+            return _tool_result(result_dict, fmt, name)
         if path:
             from pathlib import Path as _P
             p = _P(path)
@@ -448,10 +480,10 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                     "error": f"File not found: {p}",
                     "hint": "Check the path or use list_files to discover files.",
                 }
-                return [types.TextContent(type="text", text=render(result_dict, fmt, tool=name))]
+                return _tool_result(result_dict, fmt, name)
             except OSError as e:
                 result_dict = {"error": f"Could not read {p}: {e}"}
-                return [types.TextContent(type="text", text=render(result_dict, fmt, tool=name))]
+                return _tool_result(result_dict, fmt, name)
         else:
             source = code
 
@@ -463,6 +495,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             arguments.get("include_paths"),
             arguments.get("defines"),
             arguments.get("timeout", 30),
+            bool(arguments.get("raw", False)),
         )
         result_dict = _to_dict(raw)
 
@@ -502,11 +535,17 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         result_dict = _to_dict(raw)
 
     elif name == "lookup":
-        md = await fetch_symbol_page(
+        content, url, is_err = await fetch_symbol_page(
             arguments.get("query", ""),
             mojo_version=arguments.get("mojo_version"),
         )
-        result_dict = {"content": md, "url": ""}
+        if is_err:
+            result_dict = {
+                "error": content,
+                "hint": "Symbol names are PascalCase, modules lowercase (e.g. 'collections.dict.Dict').",
+            }
+        else:
+            result_dict = {"content": content, "url": url or ""}
 
     elif name == "changelog":
         md = await fetch_changelog(
@@ -539,9 +578,9 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             "error": f"Unknown tool: {name}",
             "hint": "Available tools: search, execute, lookup, changelog, manual, reference, cli, validate, read_file, list_files, mojo_version, install_mojo, update_server",
         }
-        return [types.TextContent(type="text", text=render(result_dict, fmt, tool="search"))]
+        return _tool_result(result_dict, fmt, "search")
 
-    return [types.TextContent(type="text", text=render(result_dict, fmt, tool=name))]
+    return _tool_result(result_dict, fmt, name)
 
 
 async def _run() -> None:

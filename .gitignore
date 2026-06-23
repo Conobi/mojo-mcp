@@ -16,3 +16,8 @@ research/
 docs/superpowers/
 docs/project-context.md
 CLAUDE.md
+
+# mutmut mutation-testing artifacts
+mutants/
+.mutmut-cache
+runok

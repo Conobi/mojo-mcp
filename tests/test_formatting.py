@@ -90,15 +90,19 @@ class TestExecuteRenderer:
         assert "returncode" in md
         assert "### stderr" not in md
 
-    def test_failure_shows_stderr_and_error_summary(self):
+    def test_failure_shows_compacted_diagnostics(self):
         result = {
-            "stdout": "", "stderr": "error: bad\n", "returncode": 1, "duration_s": 0.1,
-            "hint": "Run validate first.", "error_summary": "error: bad",
+            "stdout": "", "returncode": 1, "duration_s": 0.1,
+            "hint": "Run validate first.",
+            "diagnostics_md": (
+                "## Errors (1)\n"
+                "- error: use of unknown declaration 'X' — main.mojo:3"
+            ),
         }
         md = render(result, "md", tool="execute")
-        assert "### stderr" in md
-        assert "error: bad" in md
-        assert "error_summary" in md or "Error summary" in md
+        assert "## Errors" in md
+        assert "unknown declaration 'X'" in md
+        assert "returncode" in md
 
     def test_includes_gotcha_hints_when_present(self):
         result = {
@@ -256,7 +260,7 @@ class TestServerFormatParam:
         from mojo_mcp import server
         monkeypatch.setattr(server, "_docs", {"foo": {"name": "foo", "structs": [], "functions": [], "traits": [], "aliases": []}})
         result = await server.call_tool("search", {"code": "return list(docs.keys())"})
-        text = result[0].text
+        text = result.content[0].text
         # md output should NOT start with `{`
         assert not text.lstrip().startswith("{")
         assert "foo" in text
@@ -266,7 +270,7 @@ class TestServerFormatParam:
         from mojo_mcp import server
         monkeypatch.setattr(server, "_docs", {"foo": {"name": "foo", "structs": [], "functions": [], "traits": [], "aliases": []}})
         result = await server.call_tool("search", {"code": "return list(docs.keys())", "format": "json"})
-        text = result[0].text
+        text = result.content[0].text
         parsed = json.loads(text)
         assert "result" in parsed
 
@@ -275,7 +279,7 @@ class TestServerFormatParam:
         from mojo_mcp import server
         (tmp_path / "x.mojo").write_text("fn main(): pass\n")
         result = await server.call_tool("list_files", {"path": str(tmp_path)})
-        text = result[0].text
+        text = result.content[0].text
         assert "x.mojo" in text
         assert not text.lstrip().startswith("{")
 
@@ -283,6 +287,6 @@ class TestServerFormatParam:
     async def test_unknown_tool_error_in_md(self):
         from mojo_mcp import server
         result = await server.call_tool("nonexistent_tool", {})
-        text = result[0].text
+        text = result.content[0].text
         # md error must still be readable; json structure no longer guaranteed
         assert "nonexistent_tool" in text or "Unknown tool" in text

@@ -1,0 +1,1 @@
+{"diagnostic":{"file":"runok.mojo","fixIts":[{"end":{"column":3,"line":1},"start":{"column":1,"line":1},"text":"def"}],"location":{"column":0,"line":1},"ranges":[],"text":"fn main():"},"kind":"warning","message":"'fn' is deprecated, use 'def' instead"}

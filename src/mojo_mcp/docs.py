@@ -296,18 +296,26 @@ async def _fetch_mojolang_md(parts: list[str]) -> str | None:
 async def fetch_symbol_page(
     query: str,
     mojo_version: str | None = None,
-) -> str:
+) -> tuple[str, str | None, bool]:
     """Fetch full Mojo symbol documentation as Markdown.
 
     Strategy: pull the matching `.mojo` source from `modular/modular@<ref>`
     and parse it with `mojo_source.extract_symbol`. If the source path can't
     be resolved (e.g. the symbol moved between versions), fall back to the
     mojolang.org `.md` page.
+
+    Returns:
+        A ``(content, source_url, is_error)`` triple. ``content`` is the
+        rendered Markdown on success or a human-readable message on failure.
+        ``source_url`` is the upstream URL the docs were read from (``None`` on
+        failure). ``is_error`` is True when the symbol could not be resolved, so
+        the caller can surface it as a structured error rather than burying it
+        in the content.
     """
     try:
         parts = _split_symbol_query(query)
     except ValueError as e:
-        return f"Error: {e}"
+        return (f"Error: {e}", None, True)
 
     symbol_name = parts[-1]
     ref = await db.resolve_mojo_ref(
@@ -331,19 +339,24 @@ async def fetch_symbol_page(
                 rendered = _render_extracted_markdown(symbol_name, extracted)
                 return (
                     rendered.rstrip()
-                    + f"\n\n_Source: `{src_path}` @ `{ref}`_\n"
+                    + f"\n\n_Source: `{src_path}` @ `{ref}`_\n",
+                    url,
+                    False,
                 )
             # Source file exists but symbol wasn't found there — try next candidate
         # All source-paths failed: fall back to mojolang.org rendered page
         md = await _fetch_mojolang_md(parts)
         if md is not None:
-            return md
+            mojolang_url = db.MOJOLANG_BASE + "/docs/std/" + "/".join(parts) + ".md"
+            return (md, mojolang_url, False)
     return (
         f"Symbol not found at any of:\n"
         + "\n".join(f"- {p}" for p in candidate_paths)
         + f"\n\nTried ref `{ref}` and the mojolang.org rendered page.\n"
         "Hint: symbol names are PascalCase, module names lowercase "
-        "(e.g. 'collections.dict.Dict', 'builtin.int.Int')."
+        "(e.g. 'collections.dict.Dict', 'builtin.int.Int').",
+        None,
+        True,
     )
 
 

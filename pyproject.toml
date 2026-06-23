@@ -13,6 +13,8 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "hypothesis>=6.0",
+    "mutmut>=2.4",
 ]
 
 [project.scripts]
@@ -31,3 +33,15 @@ markers = [
     "mojo: tests that require a working Mojo installation (deselected by default)",
 ]
 addopts = ""
+
+[tool.mutmut]
+source_paths = ["src/mojo_mcp/diagnostics.py"]
+pytest_add_cli_args_test_selection = [
+    "tests/test_diagnostics_parse.py",
+    "tests/test_diagnostics_origin.py",
+    "tests/test_diagnostics_group_order.py",
+    "tests/test_diagnostics_suppression.py",
+    "tests/test_diagnostics_budget.py",
+    "tests/test_diagnostics_props.py",
+    "-q",
+]

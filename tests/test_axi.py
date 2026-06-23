@@ -32,7 +32,7 @@ class TestValidateHints:
         result = json.loads(run_validate(code="def main():\n    print('hi')\n"))
         assert result["count"] == 0
         assert "message" in result
-        assert "No known gotcha patterns matched" in result["message"]
+        assert "No patterns matched" in result["message"]
         assert "hint" in result
         assert "execute" in result["hint"]
 
@@ -70,7 +70,11 @@ class TestExecutePhaseA:
         mock_run.return_value = MagicMock(stdout="", stderr="error: bad\n", returncode=1)
         result = json.loads(run_execute("bad code\n"))
         assert result["returncode"] == 1
-        assert "stderr" in result
+        # stderr is now surfaced via the diagnostics envelope (errors or parse_fallback)
+        assert "diagnostics" in result
+        diag = result["diagnostics"]
+        has_content = bool(diag.get("errors")) or diag.get("parse_fallback") is not None
+        assert has_content
 
     @patch("mojo_mcp.sandbox.subprocess.run")
     @patch("mojo_mcp.sandbox.shutil.rmtree")
@@ -228,8 +232,14 @@ class TestExecuteErrorSummary:
             returncode=1,
         )
         result = json.loads(run_execute("bad code\n"))
-        assert "error_summary" in result
-        assert "error:" in result["error_summary"]
+        # error_summary is now surfaced via diagnostics envelope (errors or parse_fallback)
+        assert "diagnostics" in result
+        diag = result["diagnostics"]
+        has_error = bool(diag.get("errors")) or (
+            diag.get("parse_fallback") is not None
+            and "error" in (diag["parse_fallback"] or "")
+        )
+        assert has_error
 
     @patch("mojo_mcp.sandbox.subprocess.run")
     @patch("mojo_mcp.sandbox.shutil.rmtree")
@@ -337,7 +347,7 @@ class TestCallToolErrorHint:
     async def test_unknown_tool_md_default(self):
         from mojo_mcp.server import call_tool
         result = await call_tool("nonexistent_tool", {})
-        text = result[0].text
+        text = result.content[0].text
         assert "nonexistent_tool" in text
         assert "search" in text  # available tools listed
 
@@ -345,6 +355,6 @@ class TestCallToolErrorHint:
     async def test_unknown_tool_json_opt_in(self):
         from mojo_mcp.server import call_tool
         result = await call_tool("nonexistent_tool", {"format": "json"})
-        parsed = json.loads(result[0].text)
+        parsed = json.loads(result.content[0].text)
         assert "error" in parsed
         assert "hint" in parsed

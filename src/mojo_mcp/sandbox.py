@@ -1,11 +1,11 @@
 """Sandboxed execution for search() and execute() tools."""
 
-import concurrent.futures
 import json
 import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -13,6 +13,156 @@ from typing import Any
 from .docs import get_cached_mojo_version
 
 MAX_OUTPUT = 8192  # 8KB cap to avoid flooding context
+SEARCH_TIMEOUT_S = 5.0  # wall-clock budget for agent-supplied search snippets
+
+# Version-keyed feature-detect cache for --diagnostic-format json.
+# Key: (version_string, binary_mtime). Value: bool. Re-detect when the key
+# changes (a toolchain upgrade mid-session is not a server restart).
+_JSON_DIAG_CACHE: dict[tuple[str, float], bool] = {}
+
+# Per-session in-memory state (stdio server persists per session; reset on restart).
+_SESSION_LEDGER: dict = {}
+_LEDGER_MAX_KEYS = 2000
+_BUILD_ORDINAL = 0
+
+
+def _next_build_ordinal() -> int:
+    """Return a monotonically increasing build ordinal for the session."""
+    global _BUILD_ORDINAL
+    _BUILD_ORDINAL += 1
+    return _BUILD_ORDINAL
+
+
+def _group_to_dict(g) -> dict:
+    """Serialize a diagnostics.Group to the response shape (incl. notes)."""
+    return {
+        "message": g.message,
+        "file": g.file,
+        "lines": list(g.lines),
+        "count": g.count,
+        "origin": g.origin,
+        "fixits": list(g.fixits),
+        "notes": [_group_to_dict(n) for n in g.notes],
+    }
+
+
+def _suppressed_to_dict(g) -> dict:
+    """Serialize a suppressed Group to its one-liner response shape."""
+    return {
+        "message": g.message,
+        "file": g.file,
+        "lines": list(g.lines),
+        "count": g.count,
+    }
+
+
+def _commit_ledger(records: dict, suppress_keys) -> None:
+    """Apply the core's ledger records with LRU eviction (<= _LEDGER_MAX_KEYS)."""
+    for key, entry in records.items():
+        _SESSION_LEDGER.pop(key, None)   # move-to-end semantics
+        _SESSION_LEDGER[key] = entry
+    while len(_SESSION_LEDGER) > _LEDGER_MAX_KEYS:
+        oldest = next(iter(_SESSION_LEDGER))
+        _SESSION_LEDGER.pop(oldest, None)
+
+
+def _build_project_roots(
+    *, wrapper: str | None, source_path: str | None, cwd: str | None
+) -> frozenset:
+    """Build the realpath-normalized project-root set for origin classification.
+
+    Always includes (when present): the generated wrapper file, the caller
+    source path, cwd, and — when source_path resolves outside cwd — the parent
+    directory of the source file (so user sibling modules are project-origin).
+    Symlinks err toward project-origin by adding BOTH the logical and realpath
+    forms of each root.
+    """
+    roots: set = set()
+
+    def add(p: str) -> None:
+        roots.add(str(Path(p)))
+        try:
+            roots.add(str(Path(p).resolve()))
+        except OSError:
+            pass
+
+    if wrapper:
+        add(wrapper)
+    if cwd:
+        add(cwd)
+    if source_path:
+        add(source_path)
+        try:
+            src_rp = Path(source_path).resolve()
+            cwd_rp = Path(cwd).resolve() if cwd else None
+            inside = False
+            if cwd_rp is not None:
+                try:
+                    src_rp.relative_to(cwd_rp)
+                    inside = True
+                except ValueError:
+                    inside = False
+            if not inside:
+                add(str(src_rp.parent))
+        except OSError:
+            pass
+    return frozenset(roots)
+
+
+def _version_key(mojo_prefix: list[str]) -> tuple[str, float]:
+    """Resolve a (version_string, binary_mtime) key for feature-detect caching."""
+    version = "unknown"
+    mtime = 0.0
+    try:
+        proc = subprocess.run([*mojo_prefix, "--version"],
+                              capture_output=True, text=True, timeout=10)
+        version = (proc.stdout or proc.stderr or "unknown").strip().splitlines()[0]
+    except Exception:
+        pass
+    binary = shutil.which(mojo_prefix[0]) if mojo_prefix else None
+    if binary:
+        try:
+            mtime = Path(binary).stat().st_mtime
+        except OSError:
+            pass
+    return (version, mtime)
+
+
+def _probe_json_diagnostics(mojo_prefix: list[str]) -> bool:
+    """Probe whether the compiler accepts --diagnostic-format json.
+
+    Compiles a tiny empty module; treats an 'invalid/unknown option' style
+    rejection of the flag as unsupported. Best-effort; defaults to False on any
+    spawn failure (text path is always safe).
+    """
+    probe = tempfile.mkdtemp(prefix="mojo-mcp-probe-")
+    probe_file = f"{probe}/p.mojo"
+    try:
+        with open(probe_file, "w") as f:
+            f.write("def main():\n    pass\n")
+        # Build into the probe temp dir (explicit -o + cwd) so the output binary
+        # never lands in the caller's working directory.
+        proc = subprocess.run(
+            [*mojo_prefix, "build", "--diagnostic-format", "json",
+             "-o", f"{probe}/probe.bin", probe_file],
+            capture_output=True, text=True, timeout=60, cwd=probe)
+        blob = (proc.stderr or "") + (proc.stdout or "")
+        if re.search(r"(unknown|unrecognized|invalid).*(option|argument|diagnostic-format)",
+                     blob, re.IGNORECASE):
+            return False
+        return True
+    except Exception:
+        return False
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+
+
+def _supports_json_diagnostics(mojo_prefix: list[str]) -> bool:
+    """Return cached feature-detect result, re-probing when the version key changes."""
+    key = _version_key(mojo_prefix)
+    if key not in _JSON_DIAG_CACHE:
+        _JSON_DIAG_CACHE[key] = _probe_json_diagnostics(mojo_prefix)
+    return _JSON_DIAG_CACHE[key]
 
 
 def _json(obj: Any) -> str:
@@ -190,18 +340,27 @@ def run_search(code: str, docs: dict) -> str:
         exec(wrapped, global_ns, local_ns)  # noqa: S102
         return local_ns.get("_result")
 
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(_exec)
-    try:
-        result_data = future.result(timeout=5)
-    except concurrent.futures.TimeoutError:
-        executor.shutdown(wait=False)
-        return _json({"error": "search timed out after 5 seconds"})
-    except Exception as e:
-        executor.shutdown(wait=False)
-        return _json({"error": str(e)})
-    else:
-        executor.shutdown(wait=False)
+    _box: dict[str, Any] = {}
+
+    def _runner() -> None:
+        try:
+            _box["value"] = _exec()
+        except Exception as e:  # noqa: BLE001
+            _box["error"] = e
+
+    # Run the agent snippet in a DAEMON thread. A non-terminating snippet
+    # (e.g. ``while True: pass``) cannot be killed once started; as a daemon it
+    # is abandoned at interpreter exit instead of deadlocking atexit's
+    # thread-join (CPython concurrent.futures.thread._python_exit) — which is
+    # what a plain ThreadPoolExecutor worker did, hanging the whole process.
+    t = threading.Thread(target=_runner, name="mojo-mcp-search", daemon=True)
+    t.start()
+    t.join(timeout=SEARCH_TIMEOUT_S)
+    if t.is_alive():
+        return _json({"error": f"search timed out after {SEARCH_TIMEOUT_S:g} seconds"})
+    if "error" in _box:
+        return _json({"error": str(_box["error"])})
+    result_data = _box.get("value")
 
     if result_data is None:
         out = {
@@ -313,6 +472,7 @@ def run_execute(
     include_paths: list[str] | None = None,
     defines: dict[str, str] | None = None,
     timeout: int = 30,
+    raw: bool = False,
 ) -> str:
     """Execute Mojo code in an isolated temp directory.
 
@@ -329,6 +489,9 @@ def run_execute(
         defines:       ``-D KEY=VALUE`` (or ``-D KEY`` when value is empty/None)
                        compile-time defines.  E.g. ``{"ASSERT": "all"}``.
         timeout:       Process timeout in seconds (default 30).
+        raw:           When True, skip ledger writes and return ungrouped
+                       diagnostics (one Group per diagnostic, no cross-rebuild
+                       dedup). Useful for escape-hatch inspection.
     """
     version_file, pinned_version = _find_mojo_version_file(cwd)
     mojo_prefix = _mojo_cmd(pinned_version, cwd)
@@ -370,7 +533,9 @@ def run_execute(
                 existing = run_env.get("LD_LIBRARY_PATH", "")
                 run_env["LD_LIBRARY_PATH"] = f"{lib_dir}:{existing}" if existing else str(lib_dir)
 
-        cmd = [*mojo_prefix, "run", *extra_flags, tmp_file]
+        use_json = _supports_json_diagnostics(mojo_prefix)
+        diag_flags = ["--diagnostic-format", "json"] if use_json else []
+        cmd = [*mojo_prefix, "run", *diag_flags, *extra_flags, tmp_file]
         t0 = time.monotonic()
         result = subprocess.run(
             cmd,
@@ -381,27 +546,44 @@ def run_execute(
             env=run_env,
         )
         duration = round(time.monotonic() - t0, 1)
+        from .diagnostics import compact_diagnostics
+        project_roots = _build_project_roots(
+            wrapper=tmp_file, source_path=None, cwd=run_cwd)
+        build_ordinal = _next_build_ordinal()
+        # Resolve diagnostic file paths the same way roots are (realpath) so the
+        # pure core's containment test is consistent. The compiler already emits
+        # absolute paths for the wrapper; relative dep paths stay as-is.
+        comp = compact_diagnostics(
+            result.stderr if use_json else "",
+            project_roots=project_roots,
+            returncode=result.returncode,
+            raw_stderr=result.stderr,
+            ledger=dict(_SESSION_LEDGER),
+            build_ordinal=build_ordinal,
+            raw=raw,
+        )
+        if not raw:
+            _commit_ledger(comp.new_ledger_records, comp.suppress_keys)
         output = {
             "stdout": result.stdout[:MAX_OUTPUT],
             "returncode": result.returncode,
             "duration_s": duration,
+            "diagnostics": {
+                "errors": [_group_to_dict(g) for g in comp.errors],
+                "warnings": [_group_to_dict(g) for g in comp.warnings],
+                "suppressed": [_suppressed_to_dict(g) for g in comp.suppressed],
+                "parse_fallback": comp.parse_fallback,
+                "truncated_warning_groups": comp.truncated_warning_groups,
+            },
+            "diagnostics_md": comp.rendered,
         }
-        # Only include stderr when non-empty or on failure
-        if result.stderr or result.returncode != 0:
-            output["stderr"] = result.stderr[:MAX_OUTPUT]
         if pinned_version:
             output["mojo_version"] = pinned_version
             output["version_file"] = str(version_file)
-        # Enrich failed executions with gotcha hints
         if result.returncode != 0:
             output["hint"] = "Use validate(code=...) to check for known gotcha patterns."
-            summary = _extract_error_summary(result.stderr)
-            if summary:
-                output["error_summary"] = summary
             from .gotchas import enrich_error
-            version_for_enrich = pinned_version or "0.26.0"
-            parts = version_for_enrich.split(".")
-            version_for_enrich = ".".join(parts[:3])
+            version_for_enrich = ".".join((pinned_version or "0.26.0").split(".")[:3])
             hints = enrich_error(result.stderr, timed_out=False, mojo_version=version_for_enrich)
             if hints:
                 output["gotcha_hints"] = hints

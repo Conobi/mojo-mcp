@@ -1,0 +1,6 @@
+{"diagnostic":{"file":"note.mojo","fixIts":[],"location":{"column":18,"line":1},"ranges":[],"text":"@register_passable(\"trivial\")"},"kind":"error","message":"decorator @register_passable(\"trivial\") is removed, conform to TrivialRegisterPassable trait instead"}
+{"diagnostic":{"file":"note.mojo","fixIts":[],"location":{"column":1,"line":1},"ranges":[{"end":18,"start":1}],"text":"@register_passable(\"trivial\")"},"kind":"error","message":"use of unknown declaration 'register_passable'"}
+{"diagnostic":{"file":"note.mojo","fixIts":[],"location":{"column":4,"line":10},"ranges":[{"end":7,"start":4}],"text":"    bar(Foo())"},"kind":"error","message":"no matching function in call to 'bar'"}
+{"diagnostic":{"file":"note.mojo","fixIts":[],"location":{"column":3,"line":6},"ranges":[],"text":"fn bar(x: Int): pass"},"kind":"note","message":"candidate not viable: value passed to 'x' cannot be converted from 'Foo' to 'Int'"}
+{"diagnostic":{"file":"note.mojo","fixIts":[],"location":{"column":3,"line":7},"ranges":[],"text":"fn bar(x: Float64): pass"},"kind":"note","message":"candidate not viable: value passed to 'x' cannot be converted from 'Foo' to 'Float64'"}
+{"kind":"error","message":"failed to parse the provided Mojo source module"}

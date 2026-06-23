@@ -286,12 +286,13 @@ def _render_execute(r: dict) -> str:
     if stdout:
         fence = _fence(stdout)
         parts.append(f"### stdout\n{fence}\n{stdout}\n{fence}")
-    stderr = r.get("stderr", "")
-    if stderr:
-        fence = _fence(stderr)
-        parts.append(f"### stderr\n{fence}\n{stderr}\n{fence}")
 
-    tail = _kv_lines(r, ["returncode", "duration_s", "mojo_version", "version_file", "error_summary"])
+    # Compacted, errors-first diagnostics region (pre-rendered by the pure core).
+    diag_md = r.get("diagnostics_md", "")
+    if diag_md:
+        parts.append(diag_md)
+
+    tail = _kv_lines(r, ["returncode", "duration_s", "mojo_version", "version_file"])
     if tail:
         parts.append("\n".join(tail))
 

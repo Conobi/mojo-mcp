@@ -14,7 +14,7 @@ class TestExecutePathXOR:
         f = tmp_path / "x.mojo"
         f.write_text("def main(): pass\n")
         result = await call_tool("execute", {"code": "x", "path": str(f), "format": "json"})
-        parsed = json.loads(result[0].text)
+        parsed = json.loads(result.content[0].text)
         assert "error" in parsed
         assert "either" in parsed["error"].lower() or "not both" in parsed["error"].lower()
 
@@ -22,14 +22,14 @@ class TestExecutePathXOR:
     async def test_neither_returns_error(self):
         from mojo_mcp.server import call_tool
         result = await call_tool("execute", {"format": "json"})
-        parsed = json.loads(result[0].text)
+        parsed = json.loads(result.content[0].text)
         assert "error" in parsed
 
     @pytest.mark.asyncio
     async def test_path_missing_file_returns_error(self, tmp_path):
         from mojo_mcp.server import call_tool
         result = await call_tool("execute", {"path": str(tmp_path / "missing.mojo"), "format": "json"})
-        parsed = json.loads(result[0].text)
+        parsed = json.loads(result.content[0].text)
         assert "error" in parsed
         assert "missing.mojo" in parsed["error"] or "no such" in parsed["error"].lower() or "not found" in parsed["error"].lower()
 
@@ -45,7 +45,7 @@ class TestExecutePathHappyPath:
             result = await call_tool("execute", {
                 "path": "main.mojo", "cwd": str(tmp_path), "format": "json",
             })
-        parsed = json.loads(result[0].text)
+        parsed = json.loads(result.content[0].text)
         assert parsed["returncode"] == 0
         assert parsed["stdout"] == "hi\n"
 
@@ -58,7 +58,7 @@ class TestExecutePathHappyPath:
              patch("mojo_mcp.sandbox.shutil.rmtree"):
             mock_run.return_value = MagicMock(stdout="", stderr="", returncode=0)
             result = await call_tool("execute", {"path": str(f), "format": "json"})
-        parsed = json.loads(result[0].text)
+        parsed = json.loads(result.content[0].text)
         assert parsed["returncode"] == 0
 
     @pytest.mark.asyncio
@@ -87,5 +87,5 @@ class TestExecutePathHappyPath:
              patch("mojo_mcp.sandbox.shutil.rmtree"):
             mock_run.return_value = MagicMock(stdout="ok\n", stderr="", returncode=0)
             result = await call_tool("execute", {"code": "def main(): pass\n", "format": "json"})
-        parsed = json.loads(result[0].text)
+        parsed = json.loads(result.content[0].text)
         assert parsed["returncode"] == 0

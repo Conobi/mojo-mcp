@@ -1,0 +1,4 @@
+{"diagnostic":{"file":"note2.mojo","fixIts":[{"end":{"column":3,"line":1},"start":{"column":1,"line":1},"text":"def"}],"location":{"column":0,"line":1},"ranges":[],"text":"fn main():"},"kind":"warning","message":"'fn' is deprecated, use 'def' instead"}
+{"diagnostic":{"file":"note2.mojo","fixIts":[],"location":{"column":8,"line":3},"ranges":[],"text":"    var x = 2"},"kind":"error","message":"invalid redefinition of 'x'"}
+{"diagnostic":{"file":"note2.mojo","fixIts":[],"location":{"column":8,"line":2},"ranges":[],"text":"    var x = 1"},"kind":"note","message":"previous definition here"}
+{"kind":"error","message":"failed to parse the provided Mojo source module"}
