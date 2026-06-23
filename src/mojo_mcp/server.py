@@ -416,7 +416,6 @@ async def list_tools() -> list[types.Tool]:
     ]
 
 
-@app.call_tool()
 def _tool_result(
     result_dict: dict, fmt: str, tool: str, *, is_error: bool | None = None
 ) -> types.CallToolResult:
@@ -438,6 +437,7 @@ def _tool_result(
     )
 
 
+@app.call_tool()
 async def call_tool(name: str, arguments: dict) -> types.CallToolResult:
     loop = asyncio.get_event_loop()
     fmt = arguments.get("format", "md")
