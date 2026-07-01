@@ -231,17 +231,26 @@ def _render_mojo_version(r: dict) -> str:
     # Accept both the production shape ({global_version, pinned_version, ...})
     # and the legacy test shape ({active, pinned, ...}).
     pinned = r.get("pinned_version") or r.get("pinned")
-    active = r.get("global_version") or r.get("active")
+    global_v = r.get("global_version") or r.get("active")
+    effective = r.get("effective_version")
     if pinned:
         parts.append(f"**Pinned:** {pinned}")
-    if active:
-        parts.append(f"**Active:** {active}")
+    if effective:
+        src = r.get("effective_source")
+        suffix = f" _(via {src})_" if src else ""
+        parts.append(f"**Effective (what `execute` runs):** {effective}{suffix}")
+    if r.get("effective_command"):
+        parts.append(f"**Command:** `{r['effective_command']}`")
+    if global_v:
+        parts.append(f"**Global binary:** {global_v}")
     if r.get("version_file"):
         parts.append(f"**Source:** `{r['version_file']}`")
     if r.get("global_binary"):
-        parts.append(f"**Global binary:** `{r['global_binary']}`")
+        parts.append(f"**Global binary path:** `{r['global_binary']}`")
     if r.get("docs_ref"):
         parts.append(f"**Docs ref:** `{r['docs_ref']}`")
+    if r.get("warning"):
+        parts.append(f"\n⚠️ **Warning:** {r['warning']}")
     if r.get("hint"):
         parts.append(f"\n_{r['hint']}_")
     return "\n".join(parts) or "(no version info)"
@@ -292,7 +301,7 @@ def _render_execute(r: dict) -> str:
     if diag_md:
         parts.append(diag_md)
 
-    tail = _kv_lines(r, ["returncode", "duration_s", "mojo_version", "version_file"])
+    tail = _kv_lines(r, ["returncode", "duration_s", "mojo_source", "mojo_version", "version_file"])
     if tail:
         parts.append("\n".join(tail))
 

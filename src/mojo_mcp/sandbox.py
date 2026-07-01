@@ -243,32 +243,96 @@ def _is_prerelease(version: str) -> bool:
     return bool(_PRERELEASE_SUFFIX_RE.search(version))
 
 
-def _mojo_cmd(version: str | None, cwd: str | None = None) -> list[str]:
-    """Return the mojo command prefix for a given version.
+def _select_mojo(version: str | None, cwd: str | None = None) -> tuple[list[str], str]:
+    """Resolve the Mojo compiler for a project, preferring its own toolchain.
 
-    With a version: uses uvx --from mojo-compiler==<version> mojo (cached per version).
-      Version strings are normalized via `_normalize_mojo_compiler_version` to match
-      the two PyPI publishing schemes (legacy `0.`-prefixed calver vs modern semver).
-      Pre-release pins (e.g. `1.0.0b1`) also need `--prerelease=allow` so uv will
-      consider pre-release versions of transitive deps like `mojo-compiler-mojo-libs`.
-    Without: uses mojox from the project venv if available, else system mojo.
+    Priority (most faithful first):
+      1. ``<cwd>/.venv/bin/mojox`` — the project's package-aware frontend, exactly
+         what ``uv run mojox`` / ``run_tests.sh`` invoke.
+      2. ``<cwd>/.venv/bin/mojo`` — the project's raw compiler binary.
+      3. ``uvx --from mojo-compiler==<version> mojo`` — a version-pinned install,
+         used only when the project ships no usable venv toolchain. Versions are
+         normalized via `_normalize_mojo_compiler_version` to match the two PyPI
+         schemes (legacy `0.`-prefixed calver vs modern semver); pre-release pins
+         add ``--prerelease=allow`` so uv considers pre-release transitive deps.
+      4. ``mojo`` — the system binary, last resort.
+
+    Returns ``(command_prefix, source_label)`` where ``source_label`` is one of
+    ``project-venv-mojox`` / ``project-venv-mojo`` / ``uvx-pin`` / ``system``.
+
+    Preferring the project's own venv (steps 1–2) over the pin (step 3) makes the
+    MCP a faithful oracle: it runs the identical binary the project's own tests
+    run, rather than a same-version-string duplicate that can silently diverge.
     """
+    if cwd:
+        bin_dir = Path(cwd).resolve() / ".venv" / "bin"
+        mojox_bin = bin_dir / "mojox"
+        if mojox_bin.is_file():
+            return [str(mojox_bin)], "project-venv-mojox"
+        mojo_bin = bin_dir / "mojo"
+        if mojo_bin.is_file():
+            return [str(mojo_bin)], "project-venv-mojo"
+
     if version:
-        version = _normalize_mojo_compiler_version(version)
-        cmd = ["uvx", "--from", f"mojo-compiler=={version}"]
-        if _is_prerelease(version):
+        normalized = _normalize_mojo_compiler_version(version)
+        cmd = ["uvx", "--from", f"mojo-compiler=={normalized}"]
+        if _is_prerelease(normalized):
             cmd += ["--prerelease=allow"]
         cmd += ["mojo"]
-        return cmd
+        return cmd, "uvx-pin"
 
-    # Check for mojox in the project's venv
-    if cwd:
-        mojox_bin = Path(cwd).resolve() / ".venv" / "bin" / "mojox"
-        if mojox_bin.is_file():
-            return [str(mojox_bin)]
+    return ["mojo"], "system"
 
-    # Fallback: system mojo
-    return ["mojo"]
+
+def _mojo_cmd(version: str | None, cwd: str | None = None) -> list[str]:
+    """Return just the resolved compiler command prefix (see `_select_mojo`)."""
+    return _select_mojo(version, cwd)[0]
+
+
+_VERSION_TOKEN_RE = re.compile(r"\d+\.\d+[0-9A-Za-z.\-]*")
+
+
+def _version_token(value: str | None) -> str | None:
+    """Extract the first version-like token from a `--version` line (or None)."""
+    if not value:
+        return None
+    match = _VERSION_TOKEN_RE.search(value)
+    return match.group(0) if match else value.strip()
+
+
+def _effective_mojo_version(
+    cmd: list[str], source: str, pinned_version: str | None
+) -> str | None:
+    """Best-effort version of the compiler `execute` would actually run.
+
+    For ``uvx-pin`` the effective version *is* the pin (uvx installs exactly that),
+    so it is returned without a network round-trip. For a project venv or the
+    system binary, ``<cmd> --version`` is invoked and a version token parsed out.
+    Returns None when the binary cannot be run.
+    """
+    if source == "uvx-pin":
+        return _normalize_mojo_compiler_version(pinned_version) if pinned_version else None
+    try:
+        proc = subprocess.run(
+            [*cmd, "--version"], capture_output=True, text=True, timeout=10
+        )
+    except Exception:
+        return None
+    text = proc.stdout.strip() or proc.stderr.strip()
+    return _version_token(text) if text else None
+
+
+def _versions_disagree(pinned: str | None, effective: str | None) -> bool:
+    """Loose inequality tolerant of ``25.6`` vs ``25.6.0`` and ``0.``-prefixing."""
+    a, b = _version_token(pinned), _version_token(effective)
+    if not a or not b:
+        return False
+    a, b = a.lstrip("v"), b.lstrip("v")
+    for x, y in ((a, b), (_normalize_mojo_compiler_version(a),
+                          _normalize_mojo_compiler_version(b))):
+        if x == y or x.startswith(y) or y.startswith(x):
+            return False
+    return True
 
 
 def _find_mojo_packages(cwd: str | None) -> Path | None:
@@ -494,7 +558,7 @@ def run_execute(
                        dedup). Useful for escape-hatch inspection.
     """
     version_file, pinned_version = _find_mojo_version_file(cwd)
-    mojo_prefix = _mojo_cmd(pinned_version, cwd)
+    mojo_prefix, mojo_source = _select_mojo(pinned_version, cwd)
 
     # Auto-inject installed Mojo packages from the project's venv.
     # mojox does this automatically, but for version-pinned projects
@@ -621,6 +685,9 @@ def run_execute(
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
+    # Always surface which toolchain actually ran, so the caller can tell a
+    # project-venv run (faithful) from a uvx-pin or system fallback at a glance.
+    output.setdefault("mojo_source", mojo_source)
     return _json(output)
 
 
@@ -629,16 +696,21 @@ def run_execute(
 # ---------------------------------------------------------------------------
 
 def run_mojo_version(path: str | None = None) -> str:
-    """Report global installed version and project-pinned version.
+    """Report the Mojo compiler `execute` will actually run for `path`.
 
     Returns JSON with:
-      - global_version: output of `mojo --version` (or error)
-      - pinned_version: version string from nearest .mojo-version file
-      - version_file: path to that file
+      - global_version: `mojo --version` of the system binary. This is only the
+        system-wide fallback and is NOT necessarily what runs for a given project.
+      - pinned_version / version_file: nearest `.mojo-version` pin, if any.
+      - effective_source: which toolchain `execute` selects for `path`
+        (`project-venv-mojox` / `project-venv-mojo` / `uvx-pin` / `system`).
+      - effective_command: the resolved command prefix (space-joined).
+      - effective_version: the version that command reports / installs.
+      - warning: present when the project venv's version diverges from the pin.
     """
     result: dict[str, Any] = {}
 
-    # Global version
+    # Global (system-wide) binary — reported for context, not as "what runs here".
     mojo_path = shutil.which("mojo")
     if mojo_path:
         try:
@@ -652,10 +724,37 @@ def run_mojo_version(path: str | None = None) -> str:
         result["global_version"] = None
         result["hint"] = "Use install_mojo() to install Mojo."
 
-    # Project-pinned version
+    # Project-pinned version (declared) and the effective compiler (what runs).
     version_file, pinned_version = _find_mojo_version_file(path)
     result["pinned_version"] = pinned_version
     result["version_file"] = str(version_file) if version_file else None
+
+    cmd, source = _select_mojo(pinned_version, path)
+    result["effective_source"] = source
+    result["effective_command"] = " ".join(cmd)
+    # Skip the system-binary shellout when no mojo is installed — keeps the
+    # no-mojo path fast and side-effect free.
+    if source == "system" and not mojo_path:
+        result["effective_version"] = None
+    else:
+        result["effective_version"] = _effective_mojo_version(cmd, source, pinned_version)
+
+    if source in ("project-venv-mojox", "project-venv-mojo") and _versions_disagree(
+        pinned_version, result["effective_version"]
+    ):
+        result["warning"] = (
+            f"Project venv Mojo ({result['effective_version']}) differs from the "
+            f"pinned version ({pinned_version}). `execute` runs the venv binary — "
+            f"the same one `uv run` uses — so it may accept syntax the pin would "
+            f"reject. Run `uv sync` in the project to realign the venv with "
+            f".mojo-version."
+        )
+
+    result.setdefault(
+        "hint",
+        "`effective_*` is the compiler `execute` runs for this path; "
+        "`global_version` is only the system-wide binary.",
+    )
 
     return _json(result)
 
